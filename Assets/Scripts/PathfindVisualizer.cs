@@ -261,15 +261,24 @@ public class PathfindVisualizer : MonoBehaviour
         }
     }
 
+    private HashSet<int> pathSet;
+
     public void UpdateVisual(PathNode[] pathData, List<int> path, int startIdx, int goalIdx)
     {
         frontierCount = 0;
         visitedCount = 0;
 
+        pathSet = null;
+        if (path != null && path.Count > 0)
+        {
+            pathSet = new HashSet<int>(path);
+        }
+
         if (pathData != null)
         {
             for (int i = 0; i < svoData.leafCount; i++)
             {
+                if (pathSet != null && pathSet.Contains(i)) continue;
                 var ln = svoData.leafNodes[i];
                 var state = pathData[i].state;
                 Vector3 pos = new Vector3(ln.leafX + 0.5f, ln.leafY + 0.5f, ln.leafZ + 0.5f);
@@ -295,7 +304,7 @@ public class PathfindVisualizer : MonoBehaviour
                 if (pathCount >= pathMatrices.Length) break;
                 var ln = svoData.leafNodes[path[i]];
                 pathMatrices[pathCount++] = Matrix4x4.TRS(
-                    new Vector3(ln.leafX + 0.5f, ln.leafY + 0.5f, ln.leafZ + 0.5f),
+                    new Vector3(ln.leafX + 0.5f, ln.leafY + 1.5f, ln.leafZ + 0.5f),
                     Quaternion.identity,
                     Vector3.one
                 );
@@ -352,7 +361,7 @@ public class PathfindVisualizer : MonoBehaviour
         for (int i = 0; i < path.Count; i++)
         {
             var ln = svoData.leafNodes[path[i]];
-            pathLineObj.SetPosition(i, new Vector3(ln.leafX + 0.5f, ln.leafY + 0.5f, ln.leafZ + 0.5f));
+            pathLineObj.SetPosition(i, new Vector3(ln.leafX + 0.5f, ln.leafY + 1.5f, ln.leafZ + 0.5f));
         }
     }
 

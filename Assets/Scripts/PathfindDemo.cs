@@ -170,6 +170,8 @@ public class PathfindDemo : MonoBehaviour
         return -1;
     }
 
+    private bool pathReadbackRequested;
+
     private void Update()
     {
         HandleCameraInput();
@@ -181,7 +183,11 @@ public class PathfindDemo : MonoBehaviour
             {
                 pathFound = true;
                 running = false;
-                engine.RequestPathReadback();
+                if (!pathReadbackRequested)
+                {
+                    engine.RequestPathReadback();
+                    pathReadbackRequested = true;
+                }
             }
             else if (running && !pathFound)
             {
@@ -282,6 +288,7 @@ public class PathfindDemo : MonoBehaviour
         running = false;
         currentPath = null;
         lastResult = null;
+        pathReadbackRequested = false;
         engine.Reset();
         viz.UpdateVisual(null, null, startLeafIdx, goalLeafIdx);
     }
