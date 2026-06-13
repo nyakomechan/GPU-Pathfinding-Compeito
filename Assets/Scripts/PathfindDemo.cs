@@ -3,10 +3,13 @@ using UnityEngine;
 
 public class PathfindDemo : MonoBehaviour
 {
-    public ComputeShader pathfindShader;
+    private const int WALL_LAYER = 6;
+
+    public Material pathfindMaterial;
 
     public int gridSize = 16;
     public int itersPerFrame = 8;
+    public float heightFactor = 0.2f;
 
     private SVOBuilder svoBuilder;
     private SVOBuilder.SVOData svoData;
@@ -19,7 +22,7 @@ public class PathfindDemo : MonoBehaviour
     private bool placeMode = false;
     private bool running = false;
     private bool pathFound = false;
-    private List<int> currentPath = null;
+    private List<Vector3> currentWaypoints = null;
     private PathNode[] lastResult = null;
 
     private Camera cam;
@@ -40,14 +43,25 @@ public class PathfindDemo : MonoBehaviour
             camObj.tag = "MainCamera";
         }
 
-        if (pathfindShader == null)
+        if (pathfindMaterial == null)
         {
-            pathfindShader = Resources.Load<ComputeShader>("PathfindCompute");
+#if UNITY_EDITOR
+            pathfindMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Shaders/PathfindCompeito.compeito");
+#endif
         }
 
-        if (pathfindShader == null)
+        if (pathfindMaterial == null)
         {
-            Debug.LogError("PathfindCompute compute shader not assigned! Please assign it in the Inspector or place it in a Resources folder.");
+            Shader shader = Shader.Find("Compeito/Generated/PathfindCompeito");
+            if (shader != null)
+            {
+                pathfindMaterial = new Material(shader);
+            }
+        }
+
+        if (pathfindMaterial == null)
+        {
+            Debug.LogError("PathfindCompeito material not assigned! Please assign the .compeito asset in the Inspector.");
             enabled = false;
             return;
         }
@@ -80,7 +94,7 @@ public class PathfindDemo : MonoBehaviour
                 for (int x = 0; x < gridSize; x++)
                     svoBuilder.SetVoxel(x, y, z, grid[x + y * gridSize + z * gridSize * gridSize] != 0);
 
-        svoData = svoBuilder.Build();
+        svoData = svoBuilder.Build(heightFactor);
         Debug.Log($"SVO built: {svoData.leafCount} leaf nodes, {svoData.nodes.Count} total nodes");
 
         if (svoData.leafCount == 0)
@@ -91,7 +105,7 @@ public class PathfindDemo : MonoBehaviour
         }
 
         engine = new PathfindEngine();
-        engine.Init(pathfindShader, svoData);
+        engine.Init(pathfindMaterial, svoData, 1 << WALL_LAYER);
 
         viz = gameObject.AddComponent<PathfindVisualizer>();
         viz.Init(svoData);
@@ -127,6 +141,7 @@ public class PathfindDemo : MonoBehaviour
         foreach (var col in colliders)
         {
             if (col.transform == transform) continue;
+            col.gameObject.layer = WALL_LAYER;
             Bounds b = col.bounds;
             int minX = Mathf.Clamp(Mathf.RoundToInt(b.min.x - 0.5f), 0, gs - 1);
             int minY = Mathf.Clamp(Mathf.RoundToInt(b.min.y - 0.5f), 0, gs - 1);
@@ -199,17 +214,23 @@ public class PathfindDemo : MonoBehaviour
         if (data != null)
         {
             lastResult = data;
-            List<int> path = null;
+            List<Vector3> waypoints = null;
             if (pathFound)
             {
-                path = engine.ReconstructPath(data);
-                if (path != null) currentPath = path;
+                List<int> leafPath = engine.ReconstructPath(data);
+                if (leafPath != null)
+                {
+                    waypoints = engine.ComputeWaypoints(leafPath);
+                    if (waypoints != null)
+                        waypoints = engine.SmoothPath(waypoints);
+                }
+                if (waypoints != null) currentWaypoints = waypoints;
             }
-            viz.UpdateVisual(data, currentPath, startLeafIdx, goalLeafIdx);
+            viz.UpdateVisual(data, currentWaypoints, startLeafIdx, goalLeafIdx);
         }
         else if (lastResult != null)
         {
-            viz.UpdateVisual(lastResult, currentPath, startLeafIdx, goalLeafIdx);
+            viz.UpdateVisual(lastResult, currentWaypoints, startLeafIdx, goalLeafIdx);
         }
 
         if (running && !pathFound && !engine.IsBusy)
@@ -286,7 +307,7 @@ public class PathfindDemo : MonoBehaviour
     {
         pathFound = false;
         running = false;
-        currentPath = null;
+        currentWaypoints = null;
         lastResult = null;
         pathReadbackRequested = false;
         engine.Reset();
@@ -320,7 +341,7 @@ public class PathfindDemo : MonoBehaviour
 
         GUILayout.Label($"Iteration: {engine.Iteration}");
 
-        string status = pathFound ? $"PATH FOUND ({(currentPath != null ? currentPath.Count : 0)} steps)" :
+        string status = pathFound ? $"PATH FOUND ({(currentWaypoints != null ? currentWaypoints.Count : 0)} waypoints)" :
                         running ? "Running..." : "Idle";
         GUILayout.Label($"Status: {status}");
 
@@ -345,7 +366,7 @@ public class PathfindDemo : MonoBehaviour
                 if (startLeafIdx >= 0 && goalLeafIdx >= 0)
                 {
                     pathFound = false;
-                    currentPath = null;
+                    currentWaypoints = null;
                     lastResult = null;
                     engine.Reset();
                     running = true;

@@ -1,8 +1,8 @@
-# SVO GPU Pathfinding — Unity C# + Compute Shader 実装プラン
+# SVO GPU Pathfinding — Unity C# + Compeito 実装プラン
 
 ## 概要
 
-WebGL 2.0 GPGPU で実装済みの SVO 経路探索アルゴリズムを、Unity C# + Compute Shader に移植する。
+WebGL 2.0 GPGPU で実装済みの SVO 経路探索アルゴリズムを、Unity C# + Compeito（GPGPU Fragment Shader ジェネレータ）に移植する。
 
 **アルゴリズム**: Wavefront Propagation (プル型並列BFS)
 - 各ノードが自身の6近傍をチェックし、frontierノードがあれば自身を新規frontierに更新
@@ -16,37 +16,40 @@ WebGL 2.0 GPGPU で実装済みの SVO 経路探索アルゴリズムを、Unity
 ┌──────────────────────────────────────────────────────┐
 │  C# Host (PathfindDemo / PathfindEngine)             │
 │  - SVO構築 (CPU)                                     │
-│  - ComputeBuffer へのデータ詰め                        │
-│  - ディスパッチ制御 (ピンポン)                         │
+│  - Texture2D / RenderTexture へのデータ詰め          │
+│  - Compeito.Dispatch によるピンポン制御              │
 │  - AsyncGPUReadback で結果取得                        │
-│  - 経路復元 (CPU側で親ポインタを逆追跡)                │
+│  - 経路復元 (CPU側で親ポインタを逆追跡)              │
 └───────────────┬──────────────────────────────────────┘
-                │ ComputeBuffer.SetData / AsyncGPUReadback
+                │ Material.SetTexture / Compeito.Dispatch
 ┌───────────────▼──────────────────────────────────────┐
-│  Compute Shader (PathfindCompute.compute)             │
+│  Compeito Shader (PathfindCompeito.compeito)         │
+│   → 生成シェーダー "Compeito/Generated/PathfindCompeito"│
 │                                                       │
 │  ┌──────────────────┐   ピンポン   ┌───────────────┐ │
 │  │ pathDataA        │ ◄──────────►│ pathDataB      │ │
-│  │ (StructuredBuf)  │             │ (RWStructured) │ │
+│  │ (ARGBFloat RT)   │             │ (ARGBFloat RT) │ │
 │  └──────────────────┘             └───────────────┘ │
 │                                                       │
 │  カーネル:                                            │
-│  1. WavefrontExpand — 各スレッド=リーフ1つ、プル型展開  │
-│  2. GoalDetect      — ゴールノードのstate判定          │
-│  3. Reset           — 全ノード初期化                   │
+│  1. WavefrontExpand — 各ピクセル=リーフ1つ、プル型展開 │
+│  2. GoalDetect      — ゴールノードのstate判定         │
+│  3. Reset           — 全ノード初期化                  │
 └───────────────────────────────────────────────────────┘
 ```
 
-## WebGL版からの主な変更点
+## WebGL版 / ComputeShader版からの主な変更点
 
-| 項目 | WebGL版 | Unity版 |
-|------|---------|---------|
-| GPU計算 | FBOピンポン + Fragment Shader | ComputeShader.Dispatch + ComputeBuffer |
-| データ形式 | テクスチャにfloatエンコード | StructuredBuffer\<struct\>（直接構造体） |
-| 結果読み戻し | readPixels（同期ストール） | AsyncGPUReadback（非同期） |
-| 可視化 | Three.js InstancedMesh | Graphics.DrawMeshInstanced |
-| UI | HTML/CSSボタン・スライダー | IMGUI (OnGUI) |
-| 入力処理 | Canvas クリックイベント → Raycaster | Physics.Raycast / Plane交差 |
+| 項目 | WebGL版 | ComputeShader版 | Compeito版 |
+|------|---------|-----------------|------------|
+| GPU計算 | FBOピンポン + Fragment Shader | ComputeShader.Dispatch + ComputeBuffer | Compeito.Dispatch + RenderTexture |
+| データ形式 | テクスチャにfloatエンコード | StructuredBuffer\<struct\>（直接構造体） | ARGBFloat RenderTexture / Texture2D |
+| 隣接データ | テクスチャ | StructuredBuffer\<NeighborData\> | Texture2D<float4> (nodeCount × 2) |
+| 移動コスト | 固定 | StructuredBuffer<float> | Texture2D<float> (nodeCount × 1) |
+| 結果読み戻し | readPixels（同期ストール） | AsyncGPUReadback（非同期） | AsyncGPUReadback(RenderTexture)（非同期） |
+| 可視化 | Three.js InstancedMesh | Graphics.DrawMeshInstanced | Graphics.DrawMeshInstanced |
+| UI | HTML/CSSボタン・スライダー | IMGUI (OnGUI) | IMGUI (OnGUI) |
+| 入力処理 | Canvas クリックイベント → Raycaster | Physics.Raycast / Plane交差 | Physics.Raycast / Plane交差 |
 
 ## ファイル構成
 
@@ -54,127 +57,136 @@ WebGL 2.0 GPGPU で実装済みの SVO 経路探索アルゴリズムを、Unity
 Assets/
 ├── Scripts/
 │   ├── SVOBuilder.cs           - CPU: SVO構築 + 隣接ノード事前計算
-│   ├── PathfindEngine.cs       - GPU: ComputeBuffer管理, ディスパッチ制御, ピンポン
+│   ├── PathfindEngine.cs       - GPU: Texture/RT管理, Compeito.Dispatch, ピンポン
 │   ├── PathfindVisualizer.cs   - 描画: 壁/frontier/visited/pathの3D表示
 │   └── PathfindDemo.cs         - MonoBehaviour: 初期化, UI, 入力, アニメーションループ
-└── Shaders/
-    └── PathfindCompute.compute  - HLSL: 3カーネル(WavefrontExpand, GoalDetect, Reset)
+├── Shaders/
+│   ├── PathfindCompeito.compeito  - Compeito GPGPU カーネル
+│   └── Backup/
+│       ├── PathfindCompute.compute  - 旧 compute shader (参考用バックアップ)
+│       └── Resources/
+│           └── PathfindCompute.compute
 ```
 
-## Compute Shader 詳細 (`PathfindCompute.compute`)
+## Compeito 詳細 (`PathfindCompeito.compeito`)
 
-### データ構造
+### テクスチャデータ形式
 
-```hlsl
-struct PathNode {
-    float cost;     // 累積コスト (INF=999999)
-    int state;       // 0=unreached, 1=frontier, 2=visited
-    int parent;      // 親ノードインデックス (-1=none)
-    int padding;     // 16バイト境界合わせ
-};
+**PathNode（ARGBFloat RenderTexture）**
 
-struct NeighborData {
-    int neighbors[6]; // +X,-X,+Y,-Y,+Z,-Z のリーフインデックス (-1=none)
-};
-```
+| チャンネル | 内容 | 備考 |
+|-----------|------|------|
+| R | cost | 累積コスト (INF=999999) |
+| G | state | 0=unreached, 1=frontier, 2=visited |
+| B | parent | 親ノードインデックス (-1=none) |
+| A | - | 未使用 (0) |
 
-### バッファ
+**Neighbors（RGBAFloat Texture2D, サイズ nodeCount × 2）**
 
-| バッファ | タイプ | 内容 |
-|---------|--------|------|
-| `neighbors` | StructuredBuffer\<NeighborData\> | リーフノード6近傍インデックス (読み取り専用) |
-| `pathDataIn` | StructuredBuffer\<PathNode\> | 現在のノード状態 (読み取り) |
-| `pathDataOut` | RWStructuredBuffer\<PathNode\> | 次のノード状態 (書き込み) |
-| `goalResult` | RWStructuredBuffer\<int\> | [0]=ゴール到達フラグ |
-| `resetParams` | RWStructuredBuffer\<int\> | [0]=startIndex, [1]=nodeCount |
+| ピクセル | チャンネル | 内容 |
+|---------|-----------|------|
+| (idx, 0) | R | n0 (+X) |
+| (idx, 0) | G | n1 (-X) |
+| (idx, 0) | B | n2 (+Y) |
+| (idx, 0) | A | n3 (-Y) |
+| (idx, 1) | R | n4 (+Z) |
+| (idx, 1) | G | n5 (-Z) |
+| (idx, 1) | B, A | 未使用 |
+
+**LeafCosts（RFloat Texture2D, サイズ nodeCount × 1）**
+
+| ピクセル | 内容 |
+|---------|------|
+| (idx, 0) | リーフ idx の移動コスト |
 
 ### カーネル1: `WavefrontExpand`
 
-```
-[numthreads(64,1,1)]
-void WavefrontExpand (uint3 id : SV_DispatchThreadID)
-{
-    int idx = (int)id.x;
-    if (idx >= nodeCount) return;
+```hlsl
+#pragma kernel WavefrontExpand float4
 
-    PathNode my = pathDataIn[idx];
+Texture2D<float4> _PathDataIn;
+Texture2D<float4> _Neighbors;
+Texture2D<float> _LeafCosts;
+int _NodeCount;
+
+float4 WavefrontExpand(uint2 id) {
+    int idx = (int)id.x;
+    if (idx >= _NodeCount) return float4(INF, 0, -1, 0);
+
+    float4 my = _PathDataIn.Load(int3(idx, 0, 0));
+    int myState = (int)round(my.y);
 
     // visited → 変更なし
-    if (my.state == 2) {
-        pathDataOut[idx] = my;
-        return;
-    }
+    if (myState == 2) return my;
 
     // frontier → visited に遷移
-    if (my.state == 1) {
-        my.state = 2;
-        pathDataOut[idx] = my;
-        return;
-    }
+    if (myState == 1) return float4(my.x, 2, my.z, 0);
 
     // unreached → 6近傍のfrontierから最小costをpull
-    NeighborData nbr = neighbors[idx];
+    float4 n0 = _Neighbors.Load(int3(idx, 0, 0));
+    float4 n1 = _Neighbors.Load(int3(idx, 1, 0));
+    int nbrs[6] = { (int)n0.x, (int)n0.y, (int)n0.z, (int)n0.w, (int)n1.x, (int)n1.y };
+
     float bestCost = INF;
     int bestParent = -1;
-
     for (int i = 0; i < 6; i++) {
-        int nIdx = nbr.neighbors[i];
+        int nIdx = nbrs[i];
         if (nIdx < 0) continue;
-        PathNode nd = pathDataIn[nIdx];
-        if (nd.state != 1) continue;  // frontier以外skip
-        float newCost = nd.cost + 1.0;
+        float4 nd = _PathDataIn.Load(int3(nIdx, 0, 0));
+        if ((int)round(nd.y) != 1) continue;  // frontier以外skip
+        float newCost = nd.x + _LeafCosts.Load(int3(idx, 0, 0));
         if (newCost < bestCost) {
             bestCost = newCost;
             bestParent = nIdx;
         }
     }
 
-    PathNode result;
-    result.cost = (bestCost < INF) ? bestCost : my.cost;
-    result.state = (bestCost < INF) ? 1 : 0;  // frontier or unreached
-    result.parent = (bestCost < INF) ? bestParent : -1;
-    result.padding = 0;
-    pathDataOut[idx] = result;
+    if (bestCost < INF)
+        return float4(bestCost, 1, (float)bestParent, 0);
+    else
+        return float4(INF, 0, -1, 0);
 }
 ```
 
 ### カーネル2: `GoalDetect`
 
-```
-[numthreads(1,1,1)]
-void GoalDetect (uint3 id : SV_DispatchThreadID)
-{
-    PathNode goal = pathDataIn[goalIndex];
-    goalResult[0] = (goal.state >= 2) ? 1 : 0;
+```hlsl
+#pragma kernel GoalDetect float
+
+Texture2D<float4> _PathDataIn;
+int _GoalIndex;
+
+float GoalDetect(uint2 id) {
+    float4 goal = _PathDataIn.Load(int3(_GoalIndex, 0, 0));
+    int goalState = (int)round(goal.y);
+    return (goalState >= 2) ? 1.0 : 0.0;
 }
 ```
 
 ### カーネル3: `Reset`
 
-```
-[numthreads(64,1,1)]
-void Reset (uint3 id : SV_DispatchThreadID)
-{
+```hlsl
+#pragma kernel Reset float4
+
+int _NodeCount;
+int _StartIndex;
+
+float4 Reset(uint2 id) {
     int idx = (int)id.x;
-    if (idx >= nodeCount) return;
+    if (idx >= _NodeCount) return float4(INF, 0, -1, 0);
 
-    PathNode node;
-    node.cost = 999999.0;
-    node.state = 0;
-    node.parent = -1;
-    node.padding = 0;
-
-    pathDataOut[idx] = node;
+    if (idx == _StartIndex)
+        return float4(0.0, 1, -1, 0);   // start: cost=0, frontier
+    else
+        return float4(INF, 0, -1, 0);   // その他: unreached
 }
 ```
-
-- スタートノードのみ `cost=0, state=1(frontier)` に設定（Reset後にC#側で1要素だけ上書き）
 
 ## C# クラス詳細
 
 ### SVOBuilder.cs
 
-WebGL版 `svo-builder.js` と同一ロジック:
+変更なし。WebGL版 `svo-builder.js` と同一ロジック:
 
 - `int gridSize` → コンストラクタ引数 (16)
 - `byte[] grid` → gridSize³ のボクセル占有配列
@@ -187,56 +199,59 @@ SVOData {
     LeafNode[] leafNodes;   // 空ボクセルのリーフノードのみ
     int[] neighbors;        // leafCount×6 の隣接インデックス
     int[] voxelToLeaf;      // gridSize³ の リーフマップ (-1=壁)
+    float[] leafCosts;      // リーフごとの移動コスト
     int gridSize;
     int leafCount;
 }
 ```
 
-- 隣接計算: リーフノードの3D座標から6方向の隣接ボクセルを検索、`voxelToLeaf`でリーフインデックス取得
-
 ### PathfindEngine.cs
 
 **フィールド**:
-- `ComputeShader computeShader`
-- `ComputeBuffer neighborBuf` — 隣接データ (読み取り専用)
-- `ComputeBuffer pathDataA`, `pathDataB` — ピンポン用
-- `ComputeBuffer goalResultBuf` — ゴール到達フラグ
+- `Material program` — Compeito から生成されたマテリアル
+- `int kernelWavefront, kernelGoalDetect, kernelReset` — `material.FindPass("...")`
+- `Texture2D neighborTex` — 隣接データ (nodeCount × 2, RGBAFloat)
+- `Texture2D costTex` — 移動コスト (nodeCount × 1, RFloat)
+- `RenderTexture pathDataA`, `pathDataB` — ピンポン用 ARGBFloat RT
+- `RenderTexture goalResultTex` — ゴール到達フラグ (1×1, RFloat)
 - `int nodeCount`, `int startIdx`, `int goalIdx`
 - `bool currentReadA` — ピンポン状態
 
 **メソッド**:
-- `Init(SVOData data)`: バッファ作成・データアップロード
+- `Init(Material program, SVOData data, int wallLayerMask)`: テクスチャ作成・データアップロード
 - `SetStart(int idx)`, `SetGoal(int idx)`: インデックス設定
-- `Reset()`: Reset カーネルをディスパッチ、スタートノードをfrontierに設定
+- `Reset()`: Reset カーネルを両方の RT にディスパッチ
 - `Iterate(int count)`: WavefrontExpand × count + GoalDetect をディスパッチ、ピンポン切り替え
-- `RequestReadback()`: AsyncGPUReadback.Request() 呼び出し
+- `RequestReadback()`: `AsyncGPUReadback.Request(goalResultTex)` 呼び出し
 - `IsReadbackReady()`: 読み戻し完了判定
-- `GetGoalReached()`: goalResultBuf[0] を取得 (ゴール到達判定)
-- `GetPathData()`: pathDataIn全体を取得 (経路復元用)
+- `GetGoalReached()`: goalResultTex[0] を取得
+- `GetPathData()`: pathDataIn 全体を取得 (Color[] → PathNode[] 変換)
 - `ReconstructPath(PathNode[] data)`: ゴール→スタートの親ポインタ逆追跡
 
 **ピンポン制御**:
 
-```
-Iterate(count):
+```csharp
+DispatchWavefront(count):
   for i in 0..count-1:
-    if currentReadA:
-      cs.SetBuffer(kernel, "pathDataIn", pathDataA)
-      cs.SetBuffer(kernel, "pathDataOut", pathDataB)
-    else:
-      cs.SetBuffer(kernel, "pathDataIn", pathDataB)
-      cs.SetBuffer(kernel, "pathDataOut", pathDataA)
-    Dispatch(WavefrontExpand, nodeCount/64, 1, 1)
-    currentReadA = !currentReadA
+    RenderTexture readBuf  = currentReadA ? pathDataA : pathDataB;
+    RenderTexture writeBuf = currentReadA ? pathDataB : pathDataA;
+
+    program.SetTexture("_PathDataIn", readBuf);
+    Compeito.Dispatch(program, kernelWavefront, writeBuf);
+
+    currentReadA = !currentReadA;
+    iteration++;
 
   // GoalDetect
-  cs.SetBuffer(goalKernel, "pathDataIn", currentBuf)
-  Dispatch(GoalDetect, 1, 1, 1)
+  RenderTexture currentBuf = currentReadA ? pathDataA : pathDataB;
+  program.SetTexture("_PathDataIn", currentBuf);
+  Compeito.Dispatch(program, kernelGoalDetect, goalResultTex);
+  goalReadbackRequest = AsyncGPUReadback.Request(goalResultTex, 0, TextureFormat.RFloat);
 ```
 
 ### PathfindVisualizer.cs
 
-**描画要素**:
+変更なし。描画要素:
 
 | 要素 | 手法 | 色 |
 |------|------|-----|
@@ -248,56 +263,25 @@ Iterate(count):
 | Goal マーカー | Sphere Mesh | 赤 (0xEF476F) |
 | Zスライス平面 | 透明Quad | 黄色 (α=0.08) |
 
-- 毎フレーム `UpdateVisual(pathNodes, pathResult, startIdx, goalIdx)` 呼び出し
-- frontier/visited メッシュの `count` を動的更新
-- 経路が見つかったら LineRenderer でパス描画
-
-**カメラ操作**:
-- マウス右ドラッグ: 回転 (Orbit)
-- マウスホイール: ズーム
-- マウス中ドラッグ: パン
-
 ### PathfindDemo.cs
 
 **定数**:
 - `GRID_SIZE = 16`
 - `ITERS_PER_FRAME = 8`
 
+**主な変更点**:
+- `public ComputeShader pathfindShader` → `public Material pathfindMaterial`
+- 未割り当て時のフォールバック:
+  - Editor: `AssetDatabase.LoadAssetAtPath<Material>("Assets/Shaders/PathfindCompeito.compeito")`
+  - Runtime: `Shader.Find("Compeito/Generated/PathfindCompeito")` から Material を生成
+
 **初期化フロー** (`Awake`):
-1. グリッド生成: 外壁 + 内部壁 (WebGL版と同じ壁配置)
+1. グリッド生成: 外壁 + 内部壁
 2. `SVOBuilder` で SVO 構築
-3. `PathfindEngine.Init(svoData)` で GPU バッファ初期化
+3. `PathfindEngine.Init(pathfindMaterial, svoData)` で GPU テクスチャ初期化
 4. `PathfindVisualizer` 初期化
 5. デフォルトスタート/ゴール設定
 6. `engine.Reset()`
-
-**毎フレーム** (`Update`):
-```
-if (running && !goalReached):
-    goalReached = engine.Iterate(ITERS_PER_FRAME)
-    engine.RequestReadback()
-
-if (readbackReady):
-    pathNodes = engine.GetPathData()
-    goalReached = engine.GetGoalReached()
-    if (goalReached):
-        path = engine.ReconstructPath(pathNodes)
-    viz.UpdateVisual(pathNodes, path, startIdx, goalIdx)
-```
-
-**IMGUI** (`OnGUI`):
-- [Run] / [Pause] ボタン
-- [Step] ボタン (1イテレーション実行)
-- [Reset] ボタン
-- [Orbit] / [Place] モード切替
-- Z-Slice スライダー (0〜15)
-- 情報表示: グリッドサイズ, リーフ数, イテレーション数, frontier/visited数, ステータス
-
-**マウスクリック** (Place モード時):
-- カメラ位置からマウス方向へRay
-- Y=zSlice+0.5 平面との交差判定
-- 交差ボクセル座標 → `voxelToLeaf[idx]` でリーフインデックス
-- 左クリック: Start または Goal 設定 (右クリックで切替)
 
 ## 一連の処理フロー
 
@@ -314,11 +298,11 @@ if (readbackReady):
          │  ・空ボクセルのリーフノードを抽出
          │  ・6近傍リーフインデックスを事前計算
          ▼
-  [CPU→GPU] ComputeBuffer.SetData() でアップロード
-         │  ・neighbors (NeighborData[]) → neighborBuf
-         │  ・pathDataA/B 初期状態 → pathDataA/B
+  [CPU→GPU] Texture2D.SetPixelData() でアップロード
+         │  ・neighbors → neighborTex (Texture2D)
+         │  ・leafCosts → costTex (Texture2D)
          ▼
-  [CPU] engine.Reset() → Reset カーネルディスパッチ
+  [CPU] engine.Reset() → Reset カーネルを A/B 両方にディスパッチ
          │  ・全ノード: cost=INF, state=0, parent=-1
          │  ・スタートノード: cost=0, state=1(frontier)
 
@@ -331,35 +315,35 @@ if (readbackReady):
     ┌──────────────────────────────────────────────────┐
     │  WavefrontExpand カーネル                         │
     │                                                   │
-    │  各スレッド (dtid = リーフインデックス):          │
+    │  各ピクセル (id.x = リーフインデックス):         │
     │                                                   │
-    │    1. pathDataIn[dtid] を読み取り                 │
-    │    2. state が visited(2) → そのまま出力          │
+    │    1. _PathDataIn[id.x] を Load                 │
+    │    2. state が visited(2) → そのまま出力         │
     │    3. state が frontier(1) → visited(2) に変更   │
-    │    4. state が unreached(0):                      │
-    │       ・neighbors[dtid].neighbors[6] をチェック   │
-    │       ・frontier 近傍があれば:                    │
-    │         bestCost = min(近傍cost) + 1              │
-    │         bestParent = 近傍インデックス             │
-    │         state = frontier(1)                       │
-    │       ・frontier 近傍がなければ:                  │
-    │         変更なし (unreached)                       │
-    │    5. pathDataOut[dtid] に書き込み                │
+    │    4. state が unreached(0):                     │
+    │       ・_Neighbors[id.x] から6方向を Load        │
+    │       ・frontier 近傍があれば:                   │
+    │         bestCost = min(近傍cost) + leafCost      │
+    │         bestParent = 近傍インデックス            │
+    │         state = frontier(1)                      │
+    │       ・frontier 近傍がなければ:                 │
+    │         変更なし (unreached)                      │
+    │    5. 出力 RenderTexture[id.x] に書き込み         │
     └──────────────────────────────────────────────────┘
          │  (ピンポン切り替え: A↔B)
          ▼
   ┌──────────────────────────────────────────────────┐
   │  GoalDetect カーネル                               │
   │                                                   │
-  │    pathDataIn[goalIndex].state >= 2 ?             │
-  │      goalResult[0] = 1 : goalResult[0] = 0      │
+  │    _PathDataIn[_GoalIndex].state >= 2 ?          │
+  │      goalResultTex[0] = 1 : 0                   │
   └──────────────────────────────────────────────────┘
          │
          ▼
-  [GPU→CPU] AsyncGPUReadback.Request(goalResultBuf)
+  [GPU→CPU] AsyncGPUReadback.Request(goalResultTex)
          │
          ▼ (次フレームで結果取得)
-  [CPU] goalReached = goalResult[0] > 0
+  [CPU] goalReached = goalResultTex[0] > 0
          ├─ 0 → 続行 (次フレームで再Phase 1)
          └─ 1 → Phase 2 へ
 
@@ -386,7 +370,7 @@ if (readbackReady):
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- 毎フレームの処理フロー
+  毎フレームの処理フロー
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Update():
@@ -406,29 +390,26 @@ if (readbackReady):
 
 ## 非同期読み戻しの設計
 
-WebGL版の `readPixels` (同期ストール) に対し、Unity版は `AsyncGPUReadback` を使用:
+ComputeShader 版と同様に `AsyncGPUReadback` を使用するが、対象が RenderTexture となる。
 
 ```csharp
-private AsyncGPUReadbackRequest readbackRequest;
-
-public void RequestReadback() {
-    readbackRequest = AsyncGPUReadback.Request(goalResultBuf);
-}
-
-public bool IsReadbackReady() {
-    return readbackRequest != null && readbackRequest.done;
-}
-
+// ゴール判定 (1×1 RFloat RT)
+goalReadbackRequest = AsyncGPUReadback.Request(goalResultTex, 0, TextureFormat.RFloat);
 public int GetGoalReached() {
-    return readbackRequest.GetData<int>()[0];
+    return goalReadbackRequest.GetData<float>()[0] > 0.5f ? 1 : 0;
 }
-```
 
-経路復元時は `pathDataIn` バッファ全体の読み戻しも必要:
-
-```csharp
-public void RequestPathDataReadback() {
-    pathDataReadbackRequest = AsyncGPUReadback.Request(currentReadBuf);
+// 経路復元用 (nodeCount × 1 ARGBFloat RT)
+pathReadbackRequest = AsyncGPUReadback.Request(currentPathDataRT, 0, TextureFormat.RGBAFloat);
+public PathNode[] GetPathData() {
+    var colors = pathReadbackRequest.GetData<Color>();
+    var result = new PathNode[nodeCount];
+    for (int i = 0; i < nodeCount; i++) {
+        result[i].cost = colors[i].r;
+        result[i].state = (int)colors[i].g;
+        result[i].parent = (int)colors[i].b;
+    }
+    return result;
 }
 ```
 
@@ -436,8 +417,8 @@ public void RequestPathDataReadback() {
 
 1. **readPixelsストール回避**: WebGL版では毎フレーム同期ストールが発生していたが、Unity版では `AsyncGPUReadback` で完全に非同期化
 2. **1フレーム遅延**: 読み戻し結果は次フレームで反映されるため、表示が1フレーム遅れるがリアルタイム用途では問題なし
-3. **Dispatch回数**: 1フレームあたり 8×WavefrontExpand + 1×GoalDetect = 9ディスパッチ (WebGL版は 8×3drawcalls + 1readPixels)
-4. **ComputeBufferサイズ**: 16³ ≒ 3000リーフ × 16byte(PathNode) = 48KB → GPU VRAM的には問題なし
+3. **Dispatch回数**: 1フレームあたり 8×WavefrontExpand + 1×GoalDetect = 9 回の `Compeito.Dispatch`（各々は `Graphics.Blit` 相当）
+4. **テクスチャサイズ**: 16³ ≒ 4096 リーフ × ARGBFloat = 64KB/RT → GPU VRAM的には問題なし
 5. **InstancedMesh更新**: 毎フレーム frontier/visited のインスタンス行列を更新 → `SetData` で動的更新
 
 ## 設定パラメータ
@@ -446,5 +427,4 @@ public void RequestPathDataReadback() {
 |-----------|-----|------|
 | GRID_SIZE | 16 | 16×16×16 ボクセルグリッド |
 | ITERS_PER_FRAME | 8 | 1フレームあたりのWavefront展開回数 |
-| KERNEL_WAVEFRONT | 64 threads/group | ComputeShaderスレッドグループサイズ |
 | INF | 999999.0 | 到達不能コストの初期値 |

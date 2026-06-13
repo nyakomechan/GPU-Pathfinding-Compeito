@@ -1,0 +1,106 @@
+{
+  "ExportTimestamp": "2026-06-13 22:14:21",
+  "Context": {
+    "sceneType": "runtime",
+    "sceneName": "Multiple(2): pathfinding, DontDestroyOnLoad",
+    "nodeCount": 6,
+    "maxDepth": 0
+  },
+  "Hierarchy": [
+    {
+      "sceneName": "pathfinding",
+      "stats": {
+        "rootCount": 2,
+        "nodeCount": 2,
+        "maxDepth": 0
+      },
+      "roots": [
+        {
+          "name": "Main Camera",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "Camera",
+            "AudioListener"
+          ],
+          "siblingIndex": 0,
+          "tag": "MainCamera",
+          "layer": 0,
+          "children": []
+        },
+        {
+          "name": "Directional Light",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "Light"
+          ],
+          "siblingIndex": 1,
+          "tag": "Untagged",
+          "layer": 0,
+          "children": []
+        }
+      ]
+    },
+    {
+      "sceneName": "DontDestroyOnLoad",
+      "stats": {
+        "rootCount": 4,
+        "nodeCount": 4,
+        "maxDepth": 0
+      },
+      "roots": [
+        {
+          "name": "ContactManager",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "ContactManager"
+          ],
+          "siblingIndex": 0,
+          "tag": "Untagged",
+          "layer": 0,
+          "children": []
+        },
+        {
+          "name": "PhysBoneManager",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "PhysBoneManager",
+            "PhysBoneGrabHelper"
+          ],
+          "siblingIndex": 1,
+          "tag": "Untagged",
+          "layer": 0,
+          "children": []
+        },
+        {
+          "name": "UdonManager",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "UdonManager",
+            "PostLateUpdater"
+          ],
+          "siblingIndex": 2,
+          "tag": "Untagged",
+          "layer": 0,
+          "children": []
+        },
+        {
+          "name": "VRCBuiltInShaderGlobals-e055abf6-74e6-46a2-8e0d-f64075742cea",
+          "isActive": true,
+          "components": [
+            "Transform",
+            "VRCBuiltInShaderGlobals"
+          ],
+          "siblingIndex": 3,
+          "tag": "Untagged",
+          "layer": 0,
+          "children": []
+        }
+      ]
+    }
+  ]
+}
