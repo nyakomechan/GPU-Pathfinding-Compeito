@@ -96,16 +96,10 @@ public class PathfindDemo : MonoBehaviour
     private int FindDefaultLeaf(int x0, int y0, int z0, int x1, int y1, int z1, int dx, int dy, int dz)
     {
         int gs = pathfindingManager.VoxelWorld.GridSize;
-        int zs = dz > 0 ? z0 : z1;
-        int ze = dz > 0 ? z1 : z0;
-        int ys = dy > 0 ? y0 : y1;
-        int ye = dy > 0 ? y1 : y0;
-        int xs = dx > 0 ? x0 : x1;
-        int xe = dx > 0 ? x1 : x0;
 
-        for (int z = zs; z <= ze; z++)
-            for (int y = ys; y <= ye; y++)
-                for (int x = xs; x <= xe; x++)
+        for (int z = z0; dz > 0 ? z <= z1 : z >= z1; z += dz)
+            for (int y = y0; dy > 0 ? y <= y1 : y >= y1; y += dy)
+                for (int x = x0; dx > 0 ? x <= x1 : x >= x1; x += dx)
                 {
                     if (x < 0 || x >= gs || y < 0 || y >= gs || z < 0 || z >= gs) continue;
                     int vi = x + y * gs + z * gs * gs;
