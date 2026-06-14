@@ -178,7 +178,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private void LateUpdate()
     {
-        RenderInstanced(wallMatrices, wallCount, wallMat, Vector3.one);
+        RenderInstanced(wallMatrices, wallCount, wallMat);
     }
 
     private void Update()
@@ -189,7 +189,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
         UpdateMarkers();
     }
 
-    private void RenderInstanced(Matrix4x4[] matrices, int count, Material mat, Vector3 scale)
+    private void RenderInstanced(Matrix4x4[] matrices, int count, Material mat)
     {
         if (count == 0) return;
         int offset = 0;
@@ -197,11 +197,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
         {
             int batch = Mathf.Min(MAX_INSTANCES_PER_DRAW, count - offset);
             Matrix4x4[] batchMatrices = new Matrix4x4[batch];
-            for (int i = 0; i < batch; i++)
-            {
-                Vector3 origPos = matrices[offset + i].GetColumn(3);
-                batchMatrices[i] = Matrix4x4.TRS(origPos, Quaternion.identity, scale);
-            }
+            for (int i = 0; i < batch; i++) batchMatrices[i] = matrices[offset + i];
             Graphics.DrawMeshInstanced(cubeMesh, 0, mat, batchMatrices, batch);
             offset += batch;
         }
