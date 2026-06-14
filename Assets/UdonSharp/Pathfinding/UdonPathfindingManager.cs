@@ -11,7 +11,11 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     [Header("Settings")]
     public Material pathfindMaterial;
     public BoxCollider[] wallColliders;
-    public int gridSize = 16;
+    public int gridSizeX = 16;
+    public int gridSizeY = 16;
+    public int gridSizeZ = 16;
+    public float cellSize = 1f;
+    public Vector3 gridOrigin = Vector3.zero;
     public int wallLayer = 6;
     public float heightFactor = 0.2f;
     public int itersPerFrame = 8;
@@ -113,8 +117,10 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     private void BuildGrid()
     {
-        int gs = gridSize;
-        int total = gs * gs * gs;
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
+        int total = gsX * gsY * gsZ;
         grid = new byte[total];
 
         if (wallColliders == null) return;
@@ -125,24 +131,33 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             if (col == null) continue;
 
             Bounds b = col.bounds;
-            int minX = Mathf.Clamp(Mathf.RoundToInt(b.min.x - 0.5f), 0, gs - 1);
-            int minY = Mathf.Clamp(Mathf.RoundToInt(b.min.y - 0.5f), 0, gs - 1);
-            int minZ = Mathf.Clamp(Mathf.RoundToInt(b.min.z - 0.5f), 0, gs - 1);
-            int maxX = Mathf.Clamp(Mathf.RoundToInt(b.max.x - 0.5f), 0, gs - 1);
-            int maxY = Mathf.Clamp(Mathf.RoundToInt(b.max.y - 0.5f), 0, gs - 1);
-            int maxZ = Mathf.Clamp(Mathf.RoundToInt(b.max.z - 0.5f), 0, gs - 1);
+            float minXF = (b.min.x - gridOrigin.x) / cellSize;
+            float minYF = (b.min.y - gridOrigin.y) / cellSize;
+            float minZF = (b.min.z - gridOrigin.z) / cellSize;
+            float maxXF = (b.max.x - gridOrigin.x) / cellSize;
+            float maxYF = (b.max.y - gridOrigin.y) / cellSize;
+            float maxZF = (b.max.z - gridOrigin.z) / cellSize;
+
+            int minX = Mathf.Clamp(Mathf.RoundToInt(minXF - 0.5f), 0, gsX - 1);
+            int minY = Mathf.Clamp(Mathf.RoundToInt(minYF - 0.5f), 0, gsY - 1);
+            int minZ = Mathf.Clamp(Mathf.RoundToInt(minZF - 0.5f), 0, gsZ - 1);
+            int maxX = Mathf.Clamp(Mathf.RoundToInt(maxXF - 0.5f), 0, gsX - 1);
+            int maxY = Mathf.Clamp(Mathf.RoundToInt(maxYF - 0.5f), 0, gsY - 1);
+            int maxZ = Mathf.Clamp(Mathf.RoundToInt(maxZF - 0.5f), 0, gsZ - 1);
 
             for (int z = minZ; z <= maxZ; z++)
                 for (int y = minY; y <= maxY; y++)
                     for (int x = minX; x <= maxX; x++)
-                        grid[x + y * gs + z * gs * gs] = 1;
+                        grid[x + y * gsX + z * gsX * gsY] = 1;
         }
     }
 
     private void BuildVoxelData()
     {
-        int gs = gridSize;
-        int total = gs * gs * gs;
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
+        int total = gsX * gsY * gsZ;
 
         voxelToLeaf = new int[total];
         for (int i = 0; i < total; i++) voxelToLeaf[i] = -1;
@@ -160,11 +175,11 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         for (int i = 0; i < leafCount * 6; i++) neighbors[i] = -1;
 
         int li = 0;
-        for (int z = 0; z < gs; z++)
-            for (int y = 0; y < gs; y++)
-                for (int x = 0; x < gs; x++)
+        for (int z = 0; z < gsZ; z++)
+            for (int y = 0; y < gsY; y++)
+                for (int x = 0; x < gsX; x++)
                 {
-                    int vi = x + y * gs + z * gs * gs;
+                    int vi = x + y * gsX + z * gsX * gsY;
                     if (grid[vi] == 0)
                     {
                         voxelToLeaf[vi] = li;
@@ -177,18 +192,18 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         for (int i = 0; i < leafCount; i++)
         {
             int vi = leafVoxelIndex[i];
-            int x = vi % gs;
-            int y = (vi / gs) % gs;
-            int z = vi / (gs * gs);
+            int x = vi % gsX;
+            int y = (vi / gsX) % gsY;
+            int z = vi / (gsX * gsY);
 
             for (int d = 0; d < 6; d++)
             {
                 int nx = x + dirX[d];
                 int ny = y + dirY[d];
                 int nz = z + dirZ[d];
-                if (nx >= 0 && nx < gs && ny >= 0 && ny < gs && nz >= 0 && nz < gs)
+                if (nx >= 0 && nx < gsX && ny >= 0 && ny < gsY && nz >= 0 && nz < gsZ)
                 {
-                    int nvi = nx + ny * gs + nz * gs * gs;
+                    int nvi = nx + ny * gsX + nz * gsX * gsY;
                     neighbors[i * 6 + d] = voxelToLeaf[nvi];
                 }
             }
@@ -482,7 +497,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         if (rawPath.Length == 1) return new Vector3[] { rawPath[0] };
 
         int wallLayerMask = 1 << wallLayer;
-        float radius = 0.25f;
+        float radius = cellSize * 0.25f;
 
         int smoothCount = 1;
         smoothBuffer[0] = rawPath[0];
@@ -548,14 +563,17 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     {
         if (voxelToLeaf == null) return -1;
 
-        int gs = gridSize;
-        int x = Mathf.RoundToInt(worldPos.x);
-        int y = Mathf.RoundToInt(worldPos.y);
-        int z = Mathf.RoundToInt(worldPos.z);
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
 
-        if (x < 0 || x >= gs || y < 0 || y >= gs || z < 0 || z >= gs) return -1;
+        int x = Mathf.RoundToInt((worldPos.x - gridOrigin.x) / cellSize);
+        int y = Mathf.RoundToInt((worldPos.y - gridOrigin.y) / cellSize);
+        int z = Mathf.RoundToInt((worldPos.z - gridOrigin.z) / cellSize);
 
-        int vi = x + y * gs + z * gs * gs;
+        if (x < 0 || x >= gsX || y < 0 || y >= gsY || z < 0 || z >= gsZ) return -1;
+
+        int vi = x + y * gsX + z * gsX * gsY;
         return voxelToLeaf[vi];
     }
 
@@ -563,17 +581,22 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     {
         if (leafIdx < 0 || leafIdx >= leafCount) return Vector3.zero;
 
-        int gs = gridSize;
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+
         int vi = leafVoxelIndex[leafIdx];
-        int x = vi % gs;
-        int y = (vi / gs) % gs;
-        int z = vi / (gs * gs);
+        int x = vi % gsX;
+        int y = (vi / gsX) % gsY;
+        int z = vi / (gsX * gsY);
+
+        Vector3 basePos = gridOrigin + new Vector3(x, y, z) * cellSize;
 
         if (center)
         {
-            return new Vector3(x, y, z);
+            basePos += new Vector3(cellSize, cellSize, cellSize) * 0.5f;
         }
-        return new Vector3(x, y, z);
+
+        return basePos;
     }
 
     public int FindNearestEmptyLeaf(Vector3 worldPos)
@@ -581,21 +604,24 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         int idx = WorldToLeaf(worldPos);
         if (idx >= 0) return idx;
 
-        int gs = gridSize;
-        int cx = Mathf.RoundToInt(worldPos.x);
-        int cy = Mathf.RoundToInt(worldPos.y);
-        int cz = Mathf.RoundToInt(worldPos.z);
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
 
-        int searchRange = Mathf.Max(gs, Mathf.Max(gs, gs));
+        int cx = Mathf.RoundToInt((worldPos.x - gridOrigin.x) / cellSize);
+        int cy = Mathf.RoundToInt((worldPos.y - gridOrigin.y) / cellSize);
+        int cz = Mathf.RoundToInt((worldPos.z - gridOrigin.z) / cellSize);
+
+        int searchRange = Mathf.Max(gsX, Mathf.Max(gsY, gsZ));
         for (int r = 1; r <= searchRange; r++)
         {
             for (int z = cz - r; z <= cz + r; z++)
                 for (int y = cy - r; y <= cy + r; y++)
                     for (int x = cx - r; x <= cx + r; x++)
                     {
-                        if (x < 0 || x >= gs || y < 0 || y >= gs || z < 0 || z >= gs) continue;
+                        if (x < 0 || x >= gsX || y < 0 || y >= gsY || z < 0 || z >= gsZ) continue;
                         if (Mathf.Abs(x - cx) != r && Mathf.Abs(y - cy) != r && Mathf.Abs(z - cz) != r) continue;
-                        int vi = x + y * gs + z * gs * gs;
+                        int vi = x + y * gsX + z * gsX * gsY;
                         int li = voxelToLeaf[vi];
                         if (li >= 0) return li;
                     }

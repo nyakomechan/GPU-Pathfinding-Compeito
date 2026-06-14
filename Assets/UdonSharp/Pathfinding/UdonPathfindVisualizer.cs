@@ -83,25 +83,27 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private void CreateWallInstances()
     {
-        int gs = manager.gridSize;
+        int gsX = manager.gridSizeX;
+        int gsY = manager.gridSizeY;
+        int gsZ = manager.gridSizeZ;
+        float cs = manager.cellSize;
+        Vector3 origin = manager.gridOrigin;
+
         int[] v2l = manager.voxelToLeaf;
         if (v2l == null) return;
 
         var positions = new System.Collections.Generic.List<Matrix4x4>();
-        for (int z = 0; z < gs; z++)
+        for (int z = 0; z < gsZ; z++)
         {
-            for (int y = 0; y < gs; y++)
+            for (int y = 0; y < gsY; y++)
             {
-                for (int x = 0; x < gs; x++)
+                for (int x = 0; x < gsX; x++)
                 {
-                    int vi = x + y * gs + z * gs * gs;
+                    int vi = x + y * gsX + z * gsX * gsY;
                     if (vi >= 0 && vi < v2l.Length && v2l[vi] == -1)
                     {
-                        positions.Add(Matrix4x4.TRS(
-                            new Vector3(x + 0.5f, y + 0.5f, z + 0.5f),
-                            Quaternion.identity,
-                            Vector3.one
-                        ));
+                        Vector3 pos = origin + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * cs;
+                        positions.Add(Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * cs));
                     }
                 }
             }
@@ -112,41 +114,57 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private void CreateMarkers()
     {
+        float markerScale = manager.cellSize * 0.5f;
+
         startMarkerObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         Destroy(startMarkerObj.GetComponent<Collider>());
-        startMarkerObj.transform.localScale = Vector3.one * 0.5f;
+        startMarkerObj.transform.localScale = Vector3.one * markerScale;
         startMarkerObj.GetComponent<Renderer>().material = startMat;
         startMarkerObj.SetActive(false);
 
         goalMarkerObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         Destroy(goalMarkerObj.GetComponent<Collider>());
-        goalMarkerObj.transform.localScale = Vector3.one * 0.5f;
+        goalMarkerObj.transform.localScale = Vector3.one * markerScale;
         goalMarkerObj.GetComponent<Renderer>().material = goalMat;
         goalMarkerObj.SetActive(false);
     }
 
     private void CreateBorderFrame()
     {
-        int gs = manager.gridSize;
+        int gsX = manager.gridSizeX;
+        int gsY = manager.gridSizeY;
+        int gsZ = manager.gridSizeZ;
+        float cs = manager.cellSize;
+        Vector3 origin = manager.gridOrigin;
+
+        Vector3 size = new Vector3(gsX * cs, gsY * cs, gsZ * cs);
+        Vector3 max = origin + size;
+        Vector3 center = origin + size * 0.5f;
 
         var border = GameObject.CreatePrimitive(PrimitiveType.Cube);
         Destroy(border.GetComponent<Collider>());
-        border.transform.position = new Vector3(gs / 2f, gs / 2f, gs / 2f);
-        border.transform.localScale = new Vector3(gs, gs, gs);
+        border.transform.position = center;
+        border.transform.localScale = size;
         border.GetComponent<Renderer>().material = CreateTransparentMaterial(BORDER_COLOR, 2500);
 
         var wireGO = new GameObject("Wireframe");
         var lr = wireGO.AddComponent<LineRenderer>();
         lr.positionCount = 24;
-        lr.startWidth = 0.03f;
-        lr.endWidth = 0.03f;
+        lr.startWidth = 0.03f * cs;
+        lr.endWidth = 0.03f * cs;
         lr.material = new Material(Shader.Find("Unlit/Color"));
         lr.material.color = new Color(0.2f, 0.2f, 0.33f, 0.6f);
 
         Vector3[] corners = new Vector3[]
         {
-            new Vector3(0,0,0), new Vector3(gs,0,0), new Vector3(gs,0,gs), new Vector3(0,0,gs),
-            new Vector3(0,gs,0), new Vector3(gs,gs,0), new Vector3(gs,gs,gs), new Vector3(0,gs,gs),
+            origin,
+            new Vector3(max.x, origin.y, origin.z),
+            new Vector3(max.x, origin.y, max.z),
+            new Vector3(origin.x, origin.y, max.z),
+            new Vector3(origin.x, max.y, origin.z),
+            new Vector3(max.x, max.y, origin.z),
+            max,
+            new Vector3(origin.x, max.y, max.z),
         };
 
         Vector3[] lines = new Vector3[]
@@ -228,8 +246,8 @@ public class UdonPathfindVisualizer : MonoBehaviour
         GameObject go = new GameObject("PathLine");
         pathLineObj = go.AddComponent<LineRenderer>();
         pathLineObj.positionCount = waypoints.Length;
-        pathLineObj.startWidth = 0.15f;
-        pathLineObj.endWidth = 0.15f;
+        pathLineObj.startWidth = 0.15f * manager.cellSize;
+        pathLineObj.endWidth = 0.15f * manager.cellSize;
         pathLineObj.material = new Material(Shader.Find("Unlit/Color"));
         pathLineObj.material.color = PATH_COLOR;
 
