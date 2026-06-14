@@ -56,6 +56,8 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     public int goalLeafIdx = -1;
     public Vector3 startWorld;
     public Vector3 goalWorld;
+    public int searchIterationCount;
+    public int searchFrameCount;
     private int currentIteration;
     private int state;
     private bool readA = true;
@@ -294,6 +296,8 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         isBusy = true;
         pathFound = false;
         pathError = "";
+        searchIterationCount = 0;
+        searchFrameCount = 0;
     }
 
     private void ResetGpu()
@@ -307,6 +311,11 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     private void Update()
     {
+        if (state != STATE_IDLE)
+        {
+            searchFrameCount++;
+        }
+
         if (state == STATE_RUNNING)
         {
             Tick();
@@ -327,6 +336,8 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         pathfindMaterial.SetInt("_NodeCount", leafCount);
         pathfindMaterial.SetInt("_GoalIndex", goalLeafIdx);
         pathfindMaterial.SetInt("_LeafTexWidth", texWidth);
+
+        searchIterationCount += batch;
 
         for (int i = 0; i < batch; i++)
         {
@@ -421,6 +432,10 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         state = STATE_IDLE;
         pathFound = true;
         pathError = "";
+
+        Debug.Log(string.Format("[UdonPathfindingManager] Path found: iterations={0}, frames={1}, waypoints={2}",
+            searchIterationCount, searchFrameCount, waypoints != null ? waypoints.Length : 0));
+
         NotifyFound();
     }
 
@@ -468,6 +483,10 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         pathFound = false;
         pathError = error;
         waypoints = new Vector3[0];
+
+        Debug.LogWarning(string.Format("[UdonPathfindingManager] Path failed: {0} (iterations={1}, frames={2})",
+            error, searchIterationCount, searchFrameCount));
+
         NotifyFailed();
     }
 
