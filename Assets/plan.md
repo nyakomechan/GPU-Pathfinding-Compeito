@@ -56,10 +56,17 @@ WebGL 2.0 GPGPU で実装済みの SVO 経路探索アルゴリズムを、Unity
 ```
 Assets/
 ├── Scripts/
+│   ├── Pathfinding/            - 経路探索コアレイヤー
+│   │   ├── PathResult.cs       - 経路探索結果コンテナ
+│   │   ├── PathRequest.cs      - 経路探索リクエスト
+│   │   ├── SVODataExtensions.cs- SVOData 座標変換ヘルパー
+│   │   ├── GpuPathfinder.cs    - GPU BFS 専用エンジン
+│   │   ├── PathProcessor.cs    - 経路復元・平滑化
+│   │   ├── VoxelWorld.cs       - ボクセルグリッド / SVO 管理
+│   │   └── PathfindingManager.cs - ゲーム向け高レベルAPI
 │   ├── SVOBuilder.cs           - CPU: SVO構築 + 隣接ノード事前計算
-│   ├── PathfindEngine.cs       - GPU: Texture/RT管理, Compeito.Dispatch, ピンポン
 │   ├── PathfindVisualizer.cs   - 描画: 壁/frontier/visited/pathの3D表示
-│   └── PathfindDemo.cs         - MonoBehaviour: 初期化, UI, 入力, アニメーションループ
+│   └── PathfindDemo.cs         - MonoBehaviour: デモ用UI/入力
 ├── Shaders/
 │   ├── PathfindCompeito.compeito  - Compeito GPGPU カーネル
 │   └── Backup/
@@ -205,53 +212,111 @@ SVOData {
 }
 ```
 
-### PathfindEngine.cs
+### Pathfinding/PathResult.cs
 
-**フィールド**:
-- `Material program` — Compeito から生成されたマテリアル
-- `int kernelWavefront, kernelGoalDetect, kernelReset` — `material.FindPass("...")`
-- `Texture2D neighborTex` — 隣接データ (nodeCount × 2, RGBAFloat)
-- `Texture2D costTex` — 移動コスト (nodeCount × 1, RFloat)
-- `RenderTexture pathDataA`, `pathDataB` — ピンポン用 ARGBFloat RT
-- `RenderTexture goalResultTex` — ゴール到達フラグ (1×1, RFloat)
-- `int nodeCount`, `int startIdx`, `int goalIdx`
-- `bool currentReadA` — ピンポン状態
-
-**メソッド**:
-- `Init(Material program, SVOData data, int wallLayerMask)`: テクスチャ作成・データアップロード
-- `SetStart(int idx)`, `SetGoal(int idx)`: インデックス設定
-- `Reset()`: Reset カーネルを両方の RT にディスパッチ
-- `Iterate(int count)`: WavefrontExpand × count + GoalDetect をディスパッチ、ピンポン切り替え
-- `RequestReadback()`: `AsyncGPUReadback.Request(goalResultTex)` 呼び出し
-- `IsReadbackReady()`: 読み戻し完了判定
-- `GetGoalReached()`: goalResultTex[0] を取得
-- `GetPathData()`: pathDataIn 全体を取得 (Color[] → PathNode[] 変換)
-- `ReconstructPath(PathNode[] data)`: ゴール→スタートの親ポインタ逆追跡
-
-**ピンポン制御**:
+経路探索の結果を表すゲーム向けコンテナ。
 
 ```csharp
-DispatchWavefront(count):
-  for i in 0..count-1:
-    RenderTexture readBuf  = currentReadA ? pathDataA : pathDataB;
-    RenderTexture writeBuf = currentReadA ? pathDataB : pathDataA;
+public class PathResult
+{
+    public bool Success;
+    public string ErrorMessage;
+    public List<Vector3> Waypoints;
+    public List<int> LeafIndices;
+    public PathNode[] PathData;
+    public float TotalCost;
+    public int IterationCount;
+}
+```
 
-    program.SetTexture("_PathDataIn", readBuf);
-    Compeito.Dispatch(program, kernelWavefront, writeBuf);
+### Pathfinding/PathRequest.cs
 
-    currentReadA = !currentReadA;
-    iteration++;
+経路探索リクエスト。
 
-  // GoalDetect
-  RenderTexture currentBuf = currentReadA ? pathDataA : pathDataB;
-  program.SetTexture("_PathDataIn", currentBuf);
-  Compeito.Dispatch(program, kernelGoalDetect, goalResultTex);
-  goalReadbackRequest = AsyncGPUReadback.Request(goalResultTex, 0, TextureFormat.RFloat);
+```csharp
+public class PathRequest
+{
+    public Vector3 StartWorld;
+    public Vector3 GoalWorld;
+    public Action<PathResult> OnComplete;
+}
+```
+
+### Pathfinding/SVODataExtensions.cs
+
+`SVOData` の拡張メソッド群。
+
+- `WorldToLeaf(Vector3)` — ワールド座標 → リーフインデックス
+- `LeafToWorld(int, bool center)` — リーフインデックス → ワールド座標
+- `FindNearestEmptyLeaf(Vector3)` — 最寄りの通行可能リーフ
+- `IsValidLeaf(int)` — インデックス範囲チェック
+
+### Pathfinding/GpuPathfinder.cs
+
+**責務**: GPU 上の Wavefront BFS のみ。
+
+**主要 API**:
+
+```csharp
+public void Init(Material program, SVOData data);
+public void FindPath(int startIdx, int goalIdx, int maxIterations, Action<PathNode[]> onComplete);
+public void Tick();
+public void Cancel();
+public void Dispose();
+```
+
+`FindPath` を呼ぶと非同期探索が開始され、`Tick()` を毎フレーム呼ぶことで進行する。完了するとコールバックが呼ばれる。
+
+### Pathfinding/PathProcessor.cs
+
+**責務**: `PathNode[]` → `PathResult` への変換。
+
+- `ReconstructPath` — 親ポインタ逆追跡
+- `ComputeWaypoints` — リーフ列を 3D 座標列に変換
+- `SmoothPath` — Physics.SphereCast による直線近似
+- `Process` — 上記を統合して `PathResult` を生成
+
+### Pathfinding/VoxelWorld.cs
+
+**責務**: シーンの `BoxCollider` からボクセルグリッドを構築・管理。
+
+```csharp
+public void Rebuild();
+public void Rebuild(int gridSize, float heightFactor, int wallLayer);
+public int WorldToLeaf(Vector3 worldPos);
+public Vector3 LeafToWorld(int leafIdx, bool center = true);
+public int FindNearestEmptyLeaf(Vector3 worldPos);
+```
+
+動的な壁変更に対応するため `Rebuild()` を呼び出し可能。
+
+### Pathfinding/PathfindingManager.cs
+
+**責務**: ゲーム向け高レベル API を提供する MonoBehaviour。
+
+```csharp
+public void RequestPath(PathRequest request);
+public void RequestPath(Vector3 start, Vector3 goal, Action<PathResult> callback);
+public void RebuildWorld();
+```
+
+内部で `VoxelWorld`, `GpuPathfinder`, `PathProcessor` を連携させ、リクエストをキューイングして順次処理する。
+
+使用例:
+
+```csharp
+PathfindingManager.Instance.RequestPath(
+    transform.position,
+    target.position,
+    result => {
+        if (result.Success) agent.SetPath(result.Waypoints);
+    }
+);
 ```
 
 ### PathfindVisualizer.cs
 
-変更なし。描画要素:
+描画要素:
 
 | 要素 | 手法 | 色 |
 |------|------|-----|
@@ -263,129 +328,107 @@ DispatchWavefront(count):
 | Goal マーカー | Sphere Mesh | 赤 (0xEF476F) |
 | Zスライス平面 | 透明Quad | 黄色 (α=0.08) |
 
+`PathResult` 版の `UpdateVisual(PathResult, int startIdx, int goalIdx)` を追加。
+
 ### PathfindDemo.cs
 
-**定数**:
-- `GRID_SIZE = 16`
-- `ITERS_PER_FRAME = 8`
-
 **主な変更点**:
-- `public ComputeShader pathfindShader` → `public Material pathfindMaterial`
-- 未割り当て時のフォールバック:
-  - Editor: `AssetDatabase.LoadAssetAtPath<Material>("Assets/Shaders/PathfindCompeito.compeito")`
-  - Runtime: `Shader.Find("Compeito/Generated/PathfindCompeito")` から Material を生成
+- `PathfindEngine` 直接操作 → `PathfindingManager` 経由
+- `PathfindMaterial` 管理 → `PathfindingManager` に委譲
+- SVO / グリッド構築 → `VoxelWorld` に委譲
+- UI はカメラ操作、スタート/ゴール配置、Run/Reset ボタンのみ
 
-**初期化フロー** (`Awake`):
-1. グリッド生成: 外壁 + 内部壁
-2. `SVOBuilder` で SVO 構築
-3. `PathfindEngine.Init(pathfindMaterial, svoData)` で GPU テクスチャ初期化
-4. `PathfindVisualizer` 初期化
-5. デフォルトスタート/ゴール設定
-6. `engine.Reset()`
+**初期化フロー** (`Start`):
+1. `PathfindingManager` を確保（存在しなければ生成）
+2. `PathfindVisualizer` 初期化
+3. デフォルトスタート/ゴール設定
 
 ## 一連の処理フロー
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Phase 0: 初期化 (Awake)
+ Phase 0: 初期化
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  [CPU] グリッド生成 (外壁 + 内部壁)
-         │
+  [CPU] VoxelWorld.Rebuild()
+         │  ・シーンの BoxCollider からグリッド生成
+         │  ・SVOBuilder.Build() で SVO 構築
          ▼
-  [CPU] SVOBuilder.Build()
-         │  ・再帰的に8分木を構築
-         │  ・空ボクセルのリーフノードを抽出
-         │  ・6近傍リーフインデックスを事前計算
-         ▼
-  [CPU→GPU] Texture2D.SetPixelData() でアップロード
+  [CPU→GPU] GpuPathfinder.Init()
          │  ・neighbors → neighborTex (Texture2D)
          │  ・leafCosts → costTex (Texture2D)
+         │  ・pathDataA/B, goalResultTex を作成
          ▼
-  [CPU] engine.Reset() → Reset カーネルを A/B 両方にディスパッチ
-         │  ・全ノード: cost=INF, state=0, parent=-1
-         │  ・スタートノード: cost=0, state=1(frontier)
+  [CPU] PathProcessor 作成
+         │  ・SVOData と wallLayerMask を保持
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Phase 1: 経路探索 (Update ループ)
+ Phase 1: 経路探索リクエスト
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  for i in 0..ITERS_PER_FRAME-1:
-    ┌──────────────────────────────────────────────────┐
-    │  WavefrontExpand カーネル                         │
-    │                                                   │
-    │  各ピクセル (id.x = リーフインデックス):         │
-    │                                                   │
-    │    1. _PathDataIn[id.x] を Load                 │
-    │    2. state が visited(2) → そのまま出力         │
-    │    3. state が frontier(1) → visited(2) に変更   │
-    │    4. state が unreached(0):                     │
-    │       ・_Neighbors[id.x] から6方向を Load        │
-    │       ・frontier 近傍があれば:                   │
-    │         bestCost = min(近傍cost) + leafCost      │
-    │         bestParent = 近傍インデックス            │
-    │         state = frontier(1)                      │
-    │       ・frontier 近傍がなければ:                 │
-    │         変更なし (unreached)                      │
-    │    5. 出力 RenderTexture[id.x] に書き込み         │
-    └──────────────────────────────────────────────────┘
-         │  (ピンポン切り替え: A↔B)
-         ▼
-  ┌──────────────────────────────────────────────────┐
-  │  GoalDetect カーネル                               │
-  │                                                   │
-  │    _PathDataIn[_GoalIndex].state >= 2 ?          │
-  │      goalResultTex[0] = 1 : 0                   │
-  └──────────────────────────────────────────────────┘
+  PathfindingManager.RequestPath(startWorld, goalWorld, callback)
          │
          ▼
-  [GPU→CPU] AsyncGPUReadback.Request(goalResultTex)
-         │
-         ▼ (次フレームで結果取得)
-  [CPU] goalReached = goalResultTex[0] > 0
-         ├─ 0 → 続行 (次フレームで再Phase 1)
-         └─ 1 → Phase 2 へ
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Phase 2: 経路復元 (ゴール到達時)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  [GPU→CPU] AsyncGPUReadback.Request(pathDataBuf) で全体取得
+  [CPU] VoxelWorld.WorldToLeaf / FindNearestEmptyLeaf
          │
          ▼
-  [CPU] 経路復元:
-         │  path = []
-         │  current = goalIndex
-         │  while current != startIndex:
-         │      path.Add(current)
-         │      current = pathData[current].parent
-         │  path.Reverse()
-         ▼
-  [CPU] path → 3D座標に変換 (leafNodes[idx] → Vector3)
+  [CPU] GpuPathfinder.FindPath(startIdx, goalIdx, maxIterations, onGpuComplete)
+         │  ・Reset カーネルで初期化
+         │  ・state = Running
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Phase 2: 毎フレームの探索進行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PathfindingManager.Update():
+    GpuPathfinder.Tick()
+      │
+      ├─ Running なら WavefrontExpand をバッチ実行
+      │      → GoalDetect + AsyncGPUReadback
+      │
+      ├─ GoalReadbackPending なら完了チェック
+      │      ├─ ゴール到達 → PathData 読み戻し
+      │      ├─ 未到達 & 残イテレーションあり → 次バッチ
+      │      └─ 未到達 & 最大イテレーション → 失敗
+      │
+      └─ PathReadbackPending なら完了チェック
+             → PathNode[] をコールバックで返す
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Phase 3: 経路復元・コールバック
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PathfindingManager.OnGpuPathComplete(PathNode[])
          │
          ▼
-  [CPU] viz.UpdateVisual(pathNodes, path, startIdx, goalIdx)
+  [CPU] PathProcessor.Process(PathNode[], startIdx, goalIdx)
+         │  ・ReconstructPath
+         │  ・ComputeWaypoints
+         │  ・SmoothPath
+         ▼
+  [CPU] request.OnComplete(PathResult)
+         │
+         ▼
+  [CPU] PathfindVisualizer.UpdateVisual(PathResult)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  毎フレームの処理フロー
+  動的グリッド再構築
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Update():
-    if (running && !goalReached):
-        engine.Iterate(8)           // 8回ディスパッチ + ゴール判定
-        engine.RequestReadback()    // 非同期読み戻し要求
-
-    if (readbackReady):
-        goalReached = engine.GetGoalReached()
-        pathData = engine.GetPathData()
-        path = goalReached ? ReconstructPath(pathData) : null
-        viz.UpdateVisual(pathData, path, startIdx, goalIdx)
-
-    // カメラ回転・ズーム処理
-    // IMGUI 描画
+  PathfindingManager.RebuildWorld()
+         │
+         ▼
+  [CPU] VoxelWorld.Rebuild()
+         │  ・シーンコライダーを再スキャン
+         │  ・SVO を再構築
+         ▼
+  [CPU] GpuPathfinder を再初期化
+         │  ・RenderTexture サイズ変更
+         │  ・neighbors / leafCosts テクスチャを作り直し
 ```
 
 ## 非同期読み戻しの設計

@@ -1,38 +1,25 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 public class PathfindDemo : MonoBehaviour
 {
-    private const int WALL_LAYER = 6;
+    public PathfindingManager pathfindingManager;
 
-    public Material pathfindMaterial;
-
-    public int gridSize = 16;
-    public int itersPerFrame = 8;
-    public float heightFactor = 0.2f;
-
-    private SVOBuilder svoBuilder;
-    private SVOBuilder.SVOData svoData;
-    private PathfindEngine engine;
     private PathfindVisualizer viz;
+    private Camera cam;
 
     private int startLeafIdx = -1;
     private int goalLeafIdx = -1;
     private string clickMode = "start";
     private bool placeMode = false;
-    private bool running = false;
-    private bool pathFound = false;
-    private List<Vector3> currentWaypoints = null;
-    private PathNode[] lastResult = null;
+    private bool isDragging;
+    private PathResult lastResult;
 
-    private Camera cam;
     private Vector3 camTarget;
     private float camDistance;
     private float camTheta;
     private float camPhi;
-    private bool isDragging;
 
-    private void Awake()
+    private void Start()
     {
         cam = Camera.main;
         if (cam == null)
@@ -43,28 +30,16 @@ public class PathfindDemo : MonoBehaviour
             camObj.tag = "MainCamera";
         }
 
-        if (pathfindMaterial == null)
+        EnsurePathfindingManager();
+        if (pathfindingManager == null || pathfindingManager.VoxelWorld == null)
         {
-#if UNITY_EDITOR
-            pathfindMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Shaders/PathfindCompeito.compeito");
-#endif
-        }
-
-        if (pathfindMaterial == null)
-        {
-            Shader shader = Shader.Find("Compeito/Generated/PathfindCompeito");
-            if (shader != null)
-            {
-                pathfindMaterial = new Material(shader);
-            }
-        }
-
-        if (pathfindMaterial == null)
-        {
-            Debug.LogError("PathfindCompeito material not assigned! Please assign the .compeito asset in the Inspector.");
+            Debug.LogError("PathfindDemo: PathfindingManager is not available.");
             enabled = false;
             return;
         }
+
+        var svoData = pathfindingManager.VoxelWorld.SVOData;
+        int gridSize = pathfindingManager.VoxelWorld.GridSize;
 
         camTarget = new Vector3(gridSize / 2f, gridSize / 2f, gridSize / 2f);
         camDistance = gridSize * 2.5f;
@@ -72,7 +47,41 @@ public class PathfindDemo : MonoBehaviour
         camPhi = Mathf.PI / 3f;
         UpdateCameraPosition();
 
-        BuildScene();
+        viz = gameObject.AddComponent<PathfindVisualizer>();
+        viz.Init(svoData);
+
+        startLeafIdx = FindDefaultLeaf(1, 1, 1, gridSize - 2, gridSize - 2, 1, 1, 1, 1);
+        goalLeafIdx = FindDefaultLeaf(gridSize - 2, gridSize - 2, gridSize - 2, 1, 1, 1, -1, -1, -1);
+
+        if (startLeafIdx < 0)
+            startLeafIdx = FindDefaultLeaf(0, 0, 0, gridSize - 1, gridSize - 1, gridSize - 1, 1, 1, 1);
+        if (goalLeafIdx < 0)
+            goalLeafIdx = FindDefaultLeaf(gridSize - 1, gridSize - 1, gridSize - 1, 0, 0, 0, -1, -1, -1);
+
+        viz.UpdateVisual(lastResult, startLeafIdx, goalLeafIdx);
+    }
+
+    private void EnsurePathfindingManager()
+    {
+        if (pathfindingManager != null) return;
+
+        pathfindingManager = GetComponent<PathfindingManager>();
+        if (pathfindingManager == null)
+        {
+            pathfindingManager = FindObjectOfType<PathfindingManager>();
+        }
+
+        if (pathfindingManager == null)
+        {
+            var managerObj = new GameObject("PathfindingManager");
+            pathfindingManager = managerObj.AddComponent<PathfindingManager>();
+        }
+    }
+
+    private void Update()
+    {
+        HandleCameraInput();
+        HandleInput();
     }
 
     private void UpdateCameraPosition()
@@ -84,84 +93,9 @@ public class PathfindDemo : MonoBehaviour
         cam.transform.LookAt(camTarget);
     }
 
-    private void BuildScene()
+    private int FindDefaultLeaf(int x0, int y0, int z0, int x1, int y1, int z1, int dx, int dy, int dz)
     {
-        byte[] grid = BuildGrid();
-
-        svoBuilder = new SVOBuilder(gridSize);
-        for (int z = 0; z < gridSize; z++)
-            for (int y = 0; y < gridSize; y++)
-                for (int x = 0; x < gridSize; x++)
-                    svoBuilder.SetVoxel(x, y, z, grid[x + y * gridSize + z * gridSize * gridSize] != 0);
-
-        svoData = svoBuilder.Build(heightFactor);
-        Debug.Log($"SVO built: {svoData.leafCount} leaf nodes, {svoData.nodes.Count} total nodes");
-
-        if (svoData.leafCount == 0)
-        {
-            Debug.LogWarning("No traversable cells found. Place BoxColliders in the scene to create walls.");
-            enabled = false;
-            return;
-        }
-
-        engine = new PathfindEngine();
-        engine.Init(pathfindMaterial, svoData, 1 << WALL_LAYER);
-
-        viz = gameObject.AddComponent<PathfindVisualizer>();
-        viz.Init(svoData);
-
-        startLeafIdx = FindEmptyLeaf(1, 1, 1, gridSize - 2, gridSize - 2, 1, 1, 1, 1);
-        goalLeafIdx = FindEmptyLeaf(gridSize - 2, gridSize - 2, gridSize - 2, 1, 1, 1, -1, -1, -1);
-
-        if (startLeafIdx < 0)
-            startLeafIdx = FindEmptyLeaf(0, 0, 0, gridSize - 1, gridSize - 1, gridSize - 1, 1, 1, 1);
-        if (goalLeafIdx < 0)
-            goalLeafIdx = FindEmptyLeaf(gridSize - 1, gridSize - 1, gridSize - 1, 0, 0, 0, -1, -1, -1);
-
-        if (startLeafIdx < 0 || goalLeafIdx < 0)
-        {
-            Debug.LogWarning("Could not find start/goal positions.");
-            enabled = false;
-            return;
-        }
-
-        engine.SetStart(startLeafIdx);
-        engine.SetGoal(goalLeafIdx);
-        engine.Reset();
-
-        viz.UpdateVisual(null, null, startLeafIdx, goalLeafIdx);
-    }
-
-    private byte[] BuildGrid()
-    {
-        int gs = gridSize;
-        byte[] g = new byte[gs * gs * gs];
-
-        var colliders = FindObjectsOfType<BoxCollider>();
-        foreach (var col in colliders)
-        {
-            if (col.transform == transform) continue;
-            col.gameObject.layer = WALL_LAYER;
-            Bounds b = col.bounds;
-            int minX = Mathf.Clamp(Mathf.RoundToInt(b.min.x - 0.5f), 0, gs - 1);
-            int minY = Mathf.Clamp(Mathf.RoundToInt(b.min.y - 0.5f), 0, gs - 1);
-            int minZ = Mathf.Clamp(Mathf.RoundToInt(b.min.z - 0.5f), 0, gs - 1);
-            int maxX = Mathf.Clamp(Mathf.RoundToInt(b.max.x - 0.5f), 0, gs - 1);
-            int maxY = Mathf.Clamp(Mathf.RoundToInt(b.max.y - 0.5f), 0, gs - 1);
-            int maxZ = Mathf.Clamp(Mathf.RoundToInt(b.max.z - 0.5f), 0, gs - 1);
-
-            for (int z = minZ; z <= maxZ; z++)
-                for (int y = minY; y <= maxY; y++)
-                    for (int x = minX; x <= maxX; x++)
-                        g[x + y * gs + z * gs * gs] = 1;
-        }
-
-        return g;
-    }
-
-    private int FindEmptyLeaf(int x0, int y0, int z0, int x1, int y1, int z1, int dx, int dy, int dz)
-    {
-        int gs = gridSize;
+        int gs = pathfindingManager.VoxelWorld.GridSize;
         int zs = dz > 0 ? z0 : z1;
         int ze = dz > 0 ? z1 : z0;
         int ys = dy > 0 ? y0 : y1;
@@ -170,73 +104,16 @@ public class PathfindDemo : MonoBehaviour
         int xe = dx > 0 ? x1 : x0;
 
         for (int z = zs; z <= ze; z++)
-        {
             for (int y = ys; y <= ye; y++)
-            {
                 for (int x = xs; x <= xe; x++)
                 {
                     if (x < 0 || x >= gs || y < 0 || y >= gs || z < 0 || z >= gs) continue;
                     int vi = x + y * gs + z * gs * gs;
-                    if (svoData.voxelToLeaf[vi] >= 0)
-                        return svoData.voxelToLeaf[vi];
+                    int leafIdx = pathfindingManager.VoxelWorld.SVOData.voxelToLeaf[vi];
+                    if (leafIdx >= 0) return leafIdx;
                 }
-            }
-        }
+
         return -1;
-    }
-
-    private bool pathReadbackRequested;
-
-    private void Update()
-    {
-        HandleCameraInput();
-        HandleInput();
-
-        if (engine.UpdateReadback())
-        {
-            if (engine.GoalReached)
-            {
-                pathFound = true;
-                running = false;
-                if (!pathReadbackRequested)
-                {
-                    engine.RequestPathReadback();
-                    pathReadbackRequested = true;
-                }
-            }
-            else if (running && !pathFound)
-            {
-                engine.DispatchWavefront(itersPerFrame);
-            }
-        }
-
-        PathNode[] data = engine.GetPathData();
-        if (data != null)
-        {
-            lastResult = data;
-            List<Vector3> waypoints = null;
-            if (pathFound)
-            {
-                List<int> leafPath = engine.ReconstructPath(data);
-                if (leafPath != null)
-                {
-                    waypoints = engine.ComputeWaypoints(leafPath);
-                    if (waypoints != null)
-                        waypoints = engine.SmoothPath(waypoints);
-                }
-                if (waypoints != null) currentWaypoints = waypoints;
-            }
-            viz.UpdateVisual(data, currentWaypoints, startLeafIdx, goalLeafIdx);
-        }
-        else if (lastResult != null)
-        {
-            viz.UpdateVisual(lastResult, currentWaypoints, startLeafIdx, goalLeafIdx);
-        }
-
-        if (running && !pathFound && !engine.IsBusy)
-        {
-            engine.DispatchWavefront(itersPerFrame);
-        }
     }
 
     private void HandleCameraInput()
@@ -247,7 +124,7 @@ public class PathfindDemo : MonoBehaviour
         if (Mathf.Abs(scroll) > 0.001f)
         {
             camDistance *= 1f - scroll * 2f;
-            camDistance = Mathf.Clamp(camDistance, 2f, gridSize * 10f);
+            camDistance = Mathf.Clamp(camDistance, 2f, pathfindingManager.VoxelWorld.GridSize * 10f);
             UpdateCameraPosition();
         }
 
@@ -284,16 +161,12 @@ public class PathfindDemo : MonoBehaviour
             if (leafIdx >= 0)
             {
                 if (clickMode == "start")
-                {
                     startLeafIdx = leafIdx;
-                    engine.SetStart(leafIdx);
-                }
                 else
-                {
                     goalLeafIdx = leafIdx;
-                    engine.SetGoal(leafIdx);
-                }
-                ResetPathfinding();
+
+                lastResult = null;
+                viz.UpdateVisual(lastResult, startLeafIdx, goalLeafIdx);
             }
         }
 
@@ -303,20 +176,26 @@ public class PathfindDemo : MonoBehaviour
         }
     }
 
-    private void ResetPathfinding()
+    private void RequestPath()
     {
-        pathFound = false;
-        running = false;
-        currentWaypoints = null;
-        lastResult = null;
-        pathReadbackRequested = false;
-        engine.Reset();
-        viz.UpdateVisual(null, null, startLeafIdx, goalLeafIdx);
+        if (startLeafIdx < 0 || goalLeafIdx < 0) return;
+        if (pathfindingManager.IsBusy) return;
+
+        pathfindingManager.RequestPath(
+            pathfindingManager.VoxelWorld.LeafToWorld(startLeafIdx),
+            pathfindingManager.VoxelWorld.LeafToWorld(goalLeafIdx),
+            OnPathComplete);
+    }
+
+    private void OnPathComplete(PathResult result)
+    {
+        lastResult = result;
+        viz.UpdateVisual(result, startLeafIdx, goalLeafIdx);
     }
 
     private void OnGUI()
     {
-        int x = 10, y = 10, w = 230, h = 340;
+        int x = 10, y = 10, w = 230, h = 300;
         GUI.Box(new Rect(x, y, w, h), "");
 
         GUILayout.BeginArea(new Rect(x + 10, y + 10, w - 20, h - 20));
@@ -324,68 +203,50 @@ public class PathfindDemo : MonoBehaviour
         GUILayout.Label("<b>SVO GPU Pathfinding</b>", new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
         GUILayout.Space(5);
 
+        int gridSize = pathfindingManager.VoxelWorld.GridSize;
         GUILayout.Label($"Grid: {gridSize}x{gridSize}x{gridSize}");
-        GUILayout.Label($"Leaf nodes: {svoData.leafCount}");
+        GUILayout.Label($"Leaf nodes: {pathfindingManager.LeafCount}");
 
         if (lastResult != null)
         {
             int fc = 0, vc = 0;
-            for (int i = 0; i < svoData.leafCount; i++)
+            for (int i = 0; i < pathfindingManager.LeafCount; i++)
             {
-                if (lastResult[i].state == 2) vc++;
-                else if (lastResult[i].state == 1) fc++;
+                if (lastResult.PathData[i].state == 2) vc++;
+                else if (lastResult.PathData[i].state == 1) fc++;
             }
             GUILayout.Label($"Frontier: {fc}");
             GUILayout.Label($"Visited: {vc}");
+            GUILayout.Label($"Waypoints: {(lastResult.Waypoints != null ? lastResult.Waypoints.Count : 0)}");
         }
 
-        GUILayout.Label($"Iteration: {engine.Iteration}");
-
-        string status = pathFound ? $"PATH FOUND ({(currentWaypoints != null ? currentWaypoints.Count : 0)} waypoints)" :
-                        running ? "Running..." : "Idle";
+        string status;
+        if (lastResult != null)
+            status = lastResult.Success ? $"PATH FOUND ({(lastResult.Waypoints != null ? lastResult.Waypoints.Count : 0)} waypoints)" : "No path";
+        else
+            status = pathfindingManager.IsBusy ? "Running..." : "Idle";
         GUILayout.Label($"Status: {status}");
 
         GUILayout.Space(5);
 
-        var sn = startLeafIdx >= 0 ? svoData.leafNodes[startLeafIdx] : null;
-        var gn = goalLeafIdx >= 0 ? svoData.leafNodes[goalLeafIdx] : null;
+        var svoData = pathfindingManager.VoxelWorld.SVOData;
+        var sn = svoData.IsValidLeaf(startLeafIdx) ? svoData.leafNodes[startLeafIdx] : null;
+        var gn = svoData.IsValidLeaf(goalLeafIdx) ? svoData.leafNodes[goalLeafIdx] : null;
         GUILayout.Label($"Start: {(sn != null ? $"({sn.leafX},{sn.leafY},{sn.leafZ})" : "not set")}");
         GUILayout.Label($"Goal: {(gn != null ? $"({gn.leafX},{gn.leafY},{gn.leafZ})" : "not set")}");
 
         GUILayout.Space(10);
 
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button(running ? "Pause" : "Run", GUILayout.Width(70)))
+        if (GUILayout.Button("Run", GUILayout.Width(70)))
         {
-            if (running)
-            {
-                running = false;
-            }
-            else
-            {
-                if (startLeafIdx >= 0 && goalLeafIdx >= 0)
-                {
-                    pathFound = false;
-                    currentWaypoints = null;
-                    lastResult = null;
-                    engine.Reset();
-                    running = true;
-                }
-            }
+            RequestPath();
         }
 
-        if (GUILayout.Button("Step", GUILayout.Width(50)))
+        if (GUILayout.Button("Reset", GUILayout.Width(70)))
         {
-            if (startLeafIdx >= 0 && goalLeafIdx >= 0 && !pathFound && !engine.IsBusy)
-            {
-                if (engine.Iteration == 0) engine.Reset();
-                engine.DispatchWavefront(1);
-            }
-        }
-
-        if (GUILayout.Button("Reset", GUILayout.Width(50)))
-        {
-            ResetPathfinding();
+            lastResult = null;
+            viz.UpdateVisual(lastResult, startLeafIdx, goalLeafIdx);
         }
         GUILayout.EndHorizontal();
 
@@ -415,10 +276,5 @@ public class PathfindDemo : MonoBehaviour
         viz.SetShowSlice(newShowSlice);
 
         GUILayout.EndArea();
-    }
-
-    private void OnDestroy()
-    {
-        engine?.Dispose();
     }
 }

@@ -284,6 +284,11 @@ public class PathfindVisualizer : MonoBehaviour
         UpdateMarkers(startIdx, goalIdx);
     }
 
+    public void UpdateVisual(PathResult result, int startIdx, int goalIdx)
+    {
+        UpdateVisual(result?.PathData, result?.Waypoints, startIdx, goalIdx);
+    }
+
     private void UpdateMarkers(int startIdx, int goalIdx)
     {
         if (startIdx >= 0 && startIdx < svoData.leafCount)
