@@ -46,6 +46,10 @@ public class GpuPathfinder : IDisposable
     private static readonly int PATH_DATA_IN = Shader.PropertyToID("_PathDataIn");
     private static readonly int NEIGHBORS = Shader.PropertyToID("_Neighbors");
     private static readonly int LEAF_COSTS = Shader.PropertyToID("_LeafCosts");
+    private static readonly int LEAF_TEX_WIDTH = Shader.PropertyToID("_LeafTexWidth");
+
+    private int texWidth;
+    private int texHeight;
 
     public bool IsBusy => state != State.Idle;
     public int Iteration => iteration;
@@ -68,36 +72,49 @@ public class GpuPathfinder : IDisposable
             Debug.LogError("PathfindCompeito kernel not found. Ensure the .compeito file is imported correctly.");
         }
 
-        neighborTex = new Texture2D(nodeCount, 2, TextureFormat.RGBAFloat, false);
+        texWidth = Mathf.CeilToInt(Mathf.Sqrt(nodeCount));
+        texHeight = Mathf.CeilToInt((float)nodeCount / texWidth);
+        int neighborHeight = texHeight * 2;
+
+        neighborTex = new Texture2D(texWidth, neighborHeight, TextureFormat.RGBAFloat, false);
         neighborTex.filterMode = FilterMode.Point;
         neighborTex.wrapMode = TextureWrapMode.Clamp;
 
-        var neighborArr = new float[nodeCount * 2 * 4];
+        var neighborArr = new Color[texWidth * neighborHeight];
         for (int i = 0; i < nodeCount; i++)
         {
-            neighborArr[(i + nodeCount * 0) * 4 + 0] = data.neighbors[i * 6 + 0];
-            neighborArr[(i + nodeCount * 0) * 4 + 1] = data.neighbors[i * 6 + 1];
-            neighborArr[(i + nodeCount * 0) * 4 + 2] = data.neighbors[i * 6 + 2];
-            neighborArr[(i + nodeCount * 0) * 4 + 3] = data.neighbors[i * 6 + 3];
-            neighborArr[(i + nodeCount * 1) * 4 + 0] = data.neighbors[i * 6 + 4];
-            neighborArr[(i + nodeCount * 1) * 4 + 1] = data.neighbors[i * 6 + 5];
+            int tx = i % texWidth;
+            int ty = i / texWidth;
+            neighborArr[tx + (ty * 2 + 0) * texWidth] = new Color(
+                data.neighbors[i * 6 + 0],
+                data.neighbors[i * 6 + 1],
+                data.neighbors[i * 6 + 2],
+                data.neighbors[i * 6 + 3]);
+            neighborArr[tx + (ty * 2 + 1) * texWidth] = new Color(
+                data.neighbors[i * 6 + 4],
+                data.neighbors[i * 6 + 5],
+                0,
+                0);
         }
-        neighborTex.SetPixelData(neighborArr, 0);
+        neighborTex.SetPixels(neighborArr);
         neighborTex.Apply(false);
 
-        costTex = new Texture2D(nodeCount, 1, TextureFormat.RFloat, false);
+        costTex = new Texture2D(texWidth, texHeight, TextureFormat.RFloat, false);
         costTex.filterMode = FilterMode.Point;
         costTex.wrapMode = TextureWrapMode.Clamp;
-        costTex.SetPixelData(data.leafCosts, 0);
+        var costArr = new Color[texWidth * texHeight];
+        for (int i = 0; i < nodeCount; i++) costArr[i] = new Color(data.leafCosts[i], 0, 0, 0);
+        costTex.SetPixels(costArr);
         costTex.Apply(false);
 
-        pathDataA = Compeito.CreateRT("PathDataA", nodeCount, 1, RenderTextureFormat.ARGBFloat);
-        pathDataB = Compeito.CreateRT("PathDataB", nodeCount, 1, RenderTextureFormat.ARGBFloat);
+        pathDataA = Compeito.CreateRT("PathDataA", texWidth, texHeight, RenderTextureFormat.ARGBFloat);
+        pathDataB = Compeito.CreateRT("PathDataB", texWidth, texHeight, RenderTextureFormat.ARGBFloat);
         goalResultTex = Compeito.CreateRT("GoalResult", 1, 1, RenderTextureFormat.RFloat);
 
         program.SetTexture(NEIGHBORS, neighborTex);
         program.SetTexture(LEAF_COSTS, costTex);
         program.SetInt(NODE_COUNT, nodeCount);
+        program.SetInt(LEAF_TEX_WIDTH, texWidth);
 
         state = State.Idle;
     }
@@ -128,6 +145,7 @@ public class GpuPathfinder : IDisposable
 
         program.SetInt(START_INDEX, startIdx);
         program.SetInt(NODE_COUNT, nodeCount);
+        program.SetInt(LEAF_TEX_WIDTH, texWidth);
         Compeito.Dispatch(program, kernelReset, pathDataA);
         Compeito.Dispatch(program, kernelReset, pathDataB);
 
@@ -207,6 +225,7 @@ public class GpuPathfinder : IDisposable
     {
         program.SetInt(NODE_COUNT, nodeCount);
         program.SetInt(GOAL_INDEX, goalIdx);
+        program.SetInt(LEAF_TEX_WIDTH, texWidth);
 
         for (int i = 0; i < count; i++)
         {
@@ -243,9 +262,10 @@ public class GpuPathfinder : IDisposable
         var result = new PathNode[nodeCount];
         for (int i = 0; i < nodeCount; i++)
         {
-            result[i].cost = colors[i].r;
-            result[i].state = (int)colors[i].g;
-            result[i].parent = (int)colors[i].b;
+            Color c = colors[i];
+            result[i].cost = c.r;
+            result[i].state = (int)c.g;
+            result[i].parent = (int)c.b;
             result[i].padding = 0;
         }
         return result;

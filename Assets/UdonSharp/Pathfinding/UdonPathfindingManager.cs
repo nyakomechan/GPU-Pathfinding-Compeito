@@ -49,6 +49,9 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     private int kernelGoalDetect = -1;
     private int kernelReset = -1;
 
+    private int texWidth;
+    private int texHeight;
+
     public int startLeafIdx = -1;
     public int goalLeafIdx = -1;
     public Vector3 startWorld;
@@ -201,19 +204,25 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             return;
         }
 
-        neighborTex = new Texture2D(leafCount, 2, TextureFormat.RGBAFloat, false);
+        texWidth = Mathf.CeilToInt(Mathf.Sqrt(leafCount));
+        texHeight = Mathf.CeilToInt((float)leafCount / texWidth);
+        int neighborHeight = texHeight * 2;
+
+        neighborTex = new Texture2D(texWidth, neighborHeight, TextureFormat.RGBAFloat, false);
         neighborTex.filterMode = FilterMode.Point;
         neighborTex.wrapMode = TextureWrapMode.Clamp;
 
-        Color[] neighborArr = new Color[leafCount * 2];
+        Color[] neighborArr = new Color[texWidth * neighborHeight];
         for (int i = 0; i < leafCount; i++)
         {
-            neighborArr[i + leafCount * 0] = new Color(
+            int tx = i % texWidth;
+            int ty = i / texWidth;
+            neighborArr[tx + (ty * 2 + 0) * texWidth] = new Color(
                 neighbors[i * 6 + 0],
                 neighbors[i * 6 + 1],
                 neighbors[i * 6 + 2],
                 neighbors[i * 6 + 3]);
-            neighborArr[i + leafCount * 1] = new Color(
+            neighborArr[tx + (ty * 2 + 1) * texWidth] = new Color(
                 neighbors[i * 6 + 4],
                 neighbors[i * 6 + 5],
                 0,
@@ -222,23 +231,24 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         neighborTex.SetPixels(neighborArr);
         neighborTex.Apply(false);
 
-        costTex = new Texture2D(leafCount, 1, TextureFormat.RFloat, false);
+        costTex = new Texture2D(texWidth, texHeight, TextureFormat.RFloat, false);
         costTex.filterMode = FilterMode.Point;
         costTex.wrapMode = TextureWrapMode.Clamp;
-        Color[] costArr = new Color[leafCount];
+        Color[] costArr = new Color[texWidth * texHeight];
         for (int i = 0; i < leafCount; i++) costArr[i] = new Color(leafCosts[i], 0, 0, 0);
         costTex.SetPixels(costArr);
         costTex.Apply(false);
 
-        pathDataA = Compeito.CreateRT("PathDataA", leafCount, 1, RenderTextureFormat.ARGBFloat);
-        pathDataB = Compeito.CreateRT("PathDataB", leafCount, 1, RenderTextureFormat.ARGBFloat);
+        pathDataA = Compeito.CreateRT("PathDataA", texWidth, texHeight, RenderTextureFormat.ARGBFloat);
+        pathDataB = Compeito.CreateRT("PathDataB", texWidth, texHeight, RenderTextureFormat.ARGBFloat);
         goalResultTex = Compeito.CreateRT("GoalResult", 1, 1, RenderTextureFormat.ARGBFloat);
 
         pathfindMaterial.SetTexture("_Neighbors", neighborTex);
         pathfindMaterial.SetTexture("_LeafCosts", costTex);
         pathfindMaterial.SetInt("_NodeCount", leafCount);
+        pathfindMaterial.SetInt("_LeafTexWidth", texWidth);
 
-        pathDataBuffer = new Color[leafCount];
+        pathDataBuffer = new Color[texWidth * texHeight];
         goalResultBuffer = new Color[1];
         reconstructBuffer = new int[leafCount];
         smoothBuffer = new Vector3[leafCount];
@@ -290,6 +300,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     {
         pathfindMaterial.SetInt("_StartIndex", startLeafIdx);
         pathfindMaterial.SetInt("_NodeCount", leafCount);
+        pathfindMaterial.SetInt("_LeafTexWidth", texWidth);
         Compeito.Dispatch(pathfindMaterial, kernelReset, pathDataA);
         Compeito.Dispatch(pathfindMaterial, kernelReset, pathDataB);
     }
@@ -315,6 +326,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
         pathfindMaterial.SetInt("_NodeCount", leafCount);
         pathfindMaterial.SetInt("_GoalIndex", goalLeafIdx);
+        pathfindMaterial.SetInt("_LeafTexWidth", texWidth);
 
         for (int i = 0; i < batch; i++)
         {
