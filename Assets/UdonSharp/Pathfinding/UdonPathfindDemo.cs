@@ -16,6 +16,9 @@ public class UdonPathfindDemo : UdonSharpBehaviour
     [Header("Manual Trigger")]
     public KeyCode manualTriggerKey = KeyCode.Space;
 
+    [Header("Queue Test")]
+    public bool testQueue = false;
+
     private int frameCount;
     private bool triggered;
 
@@ -59,8 +62,18 @@ public class UdonPathfindDemo : UdonSharpBehaviour
             return;
         }
 
-        Debug.Log(string.Format("[UdonPathfindDemo] Requesting path: {0} -> {1}", start, goal));
-        manager.RequestPath(start, goal);
+        if (testQueue)
+        {
+            Debug.Log("[UdonPathfindDemo] Requesting 3 queued paths");
+            manager.RequestPath(start, goal);
+            manager.RequestPath(start, new Vector3(goal.x, goal.y, 1f));
+            manager.RequestPath(new Vector3(goal.x, 1f, goal.z), goal);
+        }
+        else
+        {
+            Debug.Log(string.Format("[UdonPathfindDemo] Requesting path: {0} -> {1}", start, goal));
+            manager.RequestPath(start, goal);
+        }
     }
 
     public void OnPathFound()

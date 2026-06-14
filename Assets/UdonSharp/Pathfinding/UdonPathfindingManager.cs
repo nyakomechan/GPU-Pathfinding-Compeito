@@ -1,5 +1,6 @@
 using UdonSharp;
 using UnityEngine;
+using VRC.SDK3.Data;
 using VRC.SDK3.Rendering;
 using VRC.Udon.Common.Interfaces;
 using imaginantia.Compeito;
@@ -51,6 +52,8 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     private int texWidth;
     private int texHeight;
+
+    private DataList requestQueue = new DataList();
 
     public int startLeafIdx = -1;
     public int goalLeafIdx = -1;
@@ -258,7 +261,6 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     public void RequestPath(Vector3 start, Vector3 goal)
     {
-        if (isBusy) return;
         if (leafCount == 0)
         {
             pathFound = false;
@@ -267,8 +269,42 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             return;
         }
 
-        requestStart = start;
-        requestGoal = goal;
+        DataDictionary request = new DataDictionary();
+        request.SetValue("sx", new DataToken(start.x));
+        request.SetValue("sy", new DataToken(start.y));
+        request.SetValue("sz", new DataToken(start.z));
+        request.SetValue("gx", new DataToken(goal.x));
+        request.SetValue("gy", new DataToken(goal.y));
+        request.SetValue("gz", new DataToken(goal.z));
+        requestQueue.Add(new DataToken(request));
+
+        ProcessQueue();
+    }
+
+    private Vector3 ReadVector3(DataDictionary dict, string xKey, string yKey, string zKey)
+    {
+        dict.TryGetValue(xKey, TokenType.Float, out DataToken tx);
+        dict.TryGetValue(yKey, TokenType.Float, out DataToken ty);
+        dict.TryGetValue(zKey, TokenType.Float, out DataToken tz);
+        return new Vector3(tx.Float, ty.Float, tz.Float);
+    }
+
+    private void ProcessQueue()
+    {
+        if (isBusy || requestQueue.Count == 0) return;
+
+        if (!requestQueue.TryGetValue(0, TokenType.DataDictionary, out DataToken token))
+        {
+            requestQueue.RemoveAt(0);
+            ProcessQueue();
+            return;
+        }
+
+        DataDictionary request = token.DataDictionary;
+        requestQueue.RemoveAt(0);
+
+        requestStart = ReadVector3(request, "sx", "sy", "sz");
+        requestGoal = ReadVector3(request, "gx", "gy", "gz");
         StartPathSearch();
     }
 
@@ -437,6 +473,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             searchIterationCount, searchFrameCount, waypoints != null ? waypoints.Length : 0));
 
         NotifyFound();
+        ProcessQueue();
     }
 
     private Vector3[] SmoothPath(Vector3[] rawPath)
@@ -488,6 +525,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             error, searchIterationCount, searchFrameCount));
 
         NotifyFailed();
+        ProcessQueue();
     }
 
     private void NotifyFound()
