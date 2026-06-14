@@ -48,7 +48,8 @@ public class VoxelWorld : MonoBehaviour
         foreach (var col in colliders)
         {
             if (col.transform == transform) continue;
-            col.gameObject.layer = wallLayer;
+            if (col.gameObject.layer != wallLayer) continue;
+
             Bounds b = col.bounds;
             int minX = Mathf.Clamp(Mathf.RoundToInt(b.min.x - 0.5f), 0, gs - 1);
             int minY = Mathf.Clamp(Mathf.RoundToInt(b.min.y - 0.5f), 0, gs - 1);
