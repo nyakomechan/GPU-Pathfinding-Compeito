@@ -74,6 +74,9 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     private Vector3 requestStart;
     private Vector3 requestGoal;
+    private UdonSharpBehaviour requestReceiver;
+    private string requestFoundEvent;
+    private string requestFailedEvent;
 
     private int[] reconstructBuffer;
     private Vector3[] smoothBuffer;
@@ -276,11 +279,21 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     public void RequestPath(Vector3 start, Vector3 goal)
     {
+        RequestPath(start, goal, resultReceiver);
+    }
+
+    public void RequestPath(Vector3 start, Vector3 goal, UdonSharpBehaviour receiver)
+    {
+        RequestPath(start, goal, receiver, foundEventName, failedEventName);
+    }
+
+    public void RequestPath(Vector3 start, Vector3 goal, UdonSharpBehaviour receiver, string foundEvent, string failedEvent)
+    {
         if (leafCount == 0)
         {
             pathFound = false;
             pathError = "No walkable voxels";
-            NotifyFailed();
+            Notify(receiver, failedEvent);
             return;
         }
 
@@ -291,6 +304,9 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         request.SetValue("gx", new DataToken(goal.x));
         request.SetValue("gy", new DataToken(goal.y));
         request.SetValue("gz", new DataToken(goal.z));
+        request.SetValue("rx", new DataToken(receiver));
+        request.SetValue("found", new DataToken(foundEvent));
+        request.SetValue("failed", new DataToken(failedEvent));
         requestQueue.Add(new DataToken(request));
 
         ProcessQueue();
@@ -302,6 +318,18 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         dict.TryGetValue(yKey, TokenType.Float, out DataToken ty);
         dict.TryGetValue(zKey, TokenType.Float, out DataToken tz);
         return new Vector3(tx.Float, ty.Float, tz.Float);
+    }
+
+    private UdonSharpBehaviour ReadReceiver(DataDictionary dict)
+    {
+        if (!dict.TryGetValue("rx", TokenType.Reference, out DataToken token)) return null;
+        return (UdonSharpBehaviour)token.Reference;
+    }
+
+    private string ReadString(DataDictionary dict, string key)
+    {
+        if (!dict.TryGetValue(key, TokenType.String, out DataToken token)) return "";
+        return token.String;
     }
 
     private void ProcessQueue()
@@ -320,6 +348,9 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
         requestStart = ReadVector3(request, "sx", "sy", "sz");
         requestGoal = ReadVector3(request, "gx", "gy", "gz");
+        requestReceiver = ReadReceiver(request);
+        requestFoundEvent = ReadString(request, "found");
+        requestFailedEvent = ReadString(request, "failed");
         StartPathSearch();
     }
 
@@ -335,7 +366,8 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         {
             pathFound = false;
             pathError = "Start or goal is not reachable";
-            NotifyFailed();
+            Notify(requestReceiver, requestFailedEvent);
+            ProcessQueue();
             return;
         }
 
@@ -487,7 +519,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         Debug.Log(string.Format("[UdonPathfindingManager] Path found: iterations={0}, frames={1}, waypoints={2}",
             searchIterationCount, searchFrameCount, waypoints != null ? waypoints.Length : 0));
 
-        NotifyFound();
+        Notify(requestReceiver, requestFoundEvent);
         ProcessQueue();
     }
 
@@ -539,23 +571,15 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         Debug.LogWarning(string.Format("[UdonPathfindingManager] Path failed: {0} (iterations={1}, frames={2})",
             error, searchIterationCount, searchFrameCount));
 
-        NotifyFailed();
+        Notify(requestReceiver, requestFailedEvent);
         ProcessQueue();
     }
 
-    private void NotifyFound()
+    private void Notify(UdonSharpBehaviour receiver, string eventName)
     {
-        if (resultReceiver != null && !string.IsNullOrEmpty(foundEventName))
+        if (receiver != null && !string.IsNullOrEmpty(eventName))
         {
-            resultReceiver.SendCustomEvent(foundEventName);
-        }
-    }
-
-    private void NotifyFailed()
-    {
-        if (resultReceiver != null && !string.IsNullOrEmpty(failedEventName))
-        {
-            resultReceiver.SendCustomEvent(failedEventName);
+            receiver.SendCustomEvent(eventName);
         }
     }
 
