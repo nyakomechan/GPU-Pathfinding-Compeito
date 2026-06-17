@@ -18,6 +18,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private Matrix4x4[] wallMatrices;
     private int wallCount;
+    private bool wallInstancesInitialized;
 
     private GameObject startMarkerObj;
     private GameObject goalMarkerObj;
@@ -38,7 +39,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
         CreateMeshes();
         CreateMaterials();
-        CreateWallInstances();
+        StartCoroutine(InitializeWallInstancesCoroutine());
         CreateMarkers();
         CreateBorderFrame();
     }
@@ -79,6 +80,35 @@ public class UdonPathfindVisualizer : MonoBehaviour
         wallMat = CreateTransparentMaterial(WALL_COLOR, 2900);
         startMat = CreateTransparentMaterial(START_MARKER_COLOR, 3100);
         goalMat = CreateTransparentMaterial(GOAL_MARKER_COLOR, 3100);
+    }
+
+    private bool IsGridDataValid()
+    {
+        if (manager == null) return false;
+        int[] v2l = manager.voxelToLeaf;
+        if (v2l == null) return false;
+        int expected = manager.gridSizeX * manager.gridSizeY * manager.gridSizeZ;
+        return v2l.Length == expected;
+    }
+
+    private System.Collections.IEnumerator InitializeWallInstancesCoroutine()
+    {
+        int attempts = 0;
+        while (!IsGridDataValid() && attempts < 60)
+        {
+            attempts++;
+            yield return null;
+        }
+
+        if (IsGridDataValid())
+        {
+            CreateWallInstances();
+            wallInstancesInitialized = true;
+        }
+        else
+        {
+            Debug.LogWarning("UdonPathfindVisualizer: manager voxel data is not valid after waiting");
+        }
     }
 
     private void CreateWallInstances()
@@ -178,6 +208,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (!wallInstancesInitialized) return;
         RenderInstanced(wallMatrices, wallCount, wallMat);
     }
 
