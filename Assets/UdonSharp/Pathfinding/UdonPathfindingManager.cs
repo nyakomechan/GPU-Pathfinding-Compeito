@@ -133,26 +133,177 @@ public class UdonPathfindingManager : UdonSharpBehaviour
             Collider col = wallColliders[c];
             if (col == null) continue;
 
-            Bounds b = col.bounds;
-            float minXF = (b.min.x - gridOrigin.x) / cellSize;
-            float minYF = (b.min.y - gridOrigin.y) / cellSize;
-            float minZF = (b.min.z - gridOrigin.z) / cellSize;
-            float maxXF = (b.max.x - gridOrigin.x) / cellSize;
-            float maxYF = (b.max.y - gridOrigin.y) / cellSize;
-            float maxZF = (b.max.z - gridOrigin.z) / cellSize;
+            BoxCollider box = col.GetComponent<BoxCollider>();
+            if (box != null)
+            {
+                FillBoxCollider(box);
+                continue;
+            }
 
-            int minX = Mathf.Clamp(Mathf.RoundToInt(minXF - 0.5f), 0, gsX - 1);
-            int minY = Mathf.Clamp(Mathf.RoundToInt(minYF - 0.5f), 0, gsY - 1);
-            int minZ = Mathf.Clamp(Mathf.RoundToInt(minZF - 0.5f), 0, gsZ - 1);
-            int maxX = Mathf.Clamp(Mathf.RoundToInt(maxXF - 0.5f), 0, gsX - 1);
-            int maxY = Mathf.Clamp(Mathf.RoundToInt(maxYF - 0.5f), 0, gsY - 1);
-            int maxZ = Mathf.Clamp(Mathf.RoundToInt(maxZF - 0.5f), 0, gsZ - 1);
+            SphereCollider sphere = col.GetComponent<SphereCollider>();
+            if (sphere != null)
+            {
+                FillSphereCollider(sphere);
+                continue;
+            }
 
-            for (int z = minZ; z <= maxZ; z++)
-                for (int y = minY; y <= maxY; y++)
-                    for (int x = minX; x <= maxX; x++)
-                        grid[x + y * gsX + z * gsX * gsY] = 1;
+            CapsuleCollider capsule = col.GetComponent<CapsuleCollider>();
+            if (capsule != null)
+            {
+                FillCapsuleCollider(capsule);
+                continue;
+            }
+
+            FillColliderBounds(col.bounds);
         }
+    }
+
+    private void FillColliderBounds(Bounds b)
+    {
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
+
+        float minXF = (b.min.x - gridOrigin.x) / cellSize;
+        float minYF = (b.min.y - gridOrigin.y) / cellSize;
+        float minZF = (b.min.z - gridOrigin.z) / cellSize;
+        float maxXF = (b.max.x - gridOrigin.x) / cellSize;
+        float maxYF = (b.max.y - gridOrigin.y) / cellSize;
+        float maxZF = (b.max.z - gridOrigin.z) / cellSize;
+
+        int minX = Mathf.Clamp(Mathf.RoundToInt(minXF - 0.5f), 0, gsX - 1);
+        int minY = Mathf.Clamp(Mathf.RoundToInt(minYF - 0.5f), 0, gsY - 1);
+        int minZ = Mathf.Clamp(Mathf.RoundToInt(minZF - 0.5f), 0, gsZ - 1);
+        int maxX = Mathf.Clamp(Mathf.RoundToInt(maxXF - 0.5f), 0, gsX - 1);
+        int maxY = Mathf.Clamp(Mathf.RoundToInt(maxYF - 0.5f), 0, gsY - 1);
+        int maxZ = Mathf.Clamp(Mathf.RoundToInt(maxZF - 0.5f), 0, gsZ - 1);
+
+        for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                    grid[x + y * gsX + z * gsX * gsY] = 1;
+    }
+
+    private void BoundsToVoxelRange(Bounds b, out int minX, out int minY, out int minZ, out int maxX, out int maxY, out int maxZ)
+    {
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        int gsZ = gridSizeZ;
+
+        float minXF = (b.min.x - gridOrigin.x) / cellSize;
+        float minYF = (b.min.y - gridOrigin.y) / cellSize;
+        float minZF = (b.min.z - gridOrigin.z) / cellSize;
+        float maxXF = (b.max.x - gridOrigin.x) / cellSize;
+        float maxYF = (b.max.y - gridOrigin.y) / cellSize;
+        float maxZF = (b.max.z - gridOrigin.z) / cellSize;
+
+        minX = Mathf.Clamp(Mathf.RoundToInt(minXF - 0.5f), 0, gsX - 1);
+        minY = Mathf.Clamp(Mathf.RoundToInt(minYF - 0.5f), 0, gsY - 1);
+        minZ = Mathf.Clamp(Mathf.RoundToInt(minZF - 0.5f), 0, gsZ - 1);
+        maxX = Mathf.Clamp(Mathf.RoundToInt(maxXF - 0.5f), 0, gsX - 1);
+        maxY = Mathf.Clamp(Mathf.RoundToInt(maxYF - 0.5f), 0, gsY - 1);
+        maxZ = Mathf.Clamp(Mathf.RoundToInt(maxZF - 0.5f), 0, gsZ - 1);
+    }
+
+    private Vector3 VoxelCenterToWorld(int x, int y, int z)
+    {
+        return gridOrigin + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * cellSize;
+    }
+
+    private void FillBoxCollider(BoxCollider box)
+    {
+        Vector3 center = box.center;
+        Vector3 halfSize = box.size * 0.5f;
+        Transform t = box.transform;
+
+        int minX, minY, minZ, maxX, maxY, maxZ;
+        BoundsToVoxelRange(box.bounds, out minX, out minY, out minZ, out maxX, out maxY, out maxZ);
+
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    Vector3 voxelCenterWorld = VoxelCenterToWorld(x, y, z);
+                    Vector3 local = t.InverseTransformPoint(voxelCenterWorld);
+                    if (Mathf.Abs(local.x - center.x) <= halfSize.x &&
+                        Mathf.Abs(local.y - center.y) <= halfSize.y &&
+                        Mathf.Abs(local.z - center.z) <= halfSize.z)
+                    {
+                        grid[x + y * gsX + z * gsX * gsY] = 1;
+                    }
+                }
+    }
+
+    private void FillSphereCollider(SphereCollider sphere)
+    {
+        Vector3 center = sphere.center;
+        float radius = sphere.radius;
+        Transform t = sphere.transform;
+
+        int minX, minY, minZ, maxX, maxY, maxZ;
+        BoundsToVoxelRange(sphere.bounds, out minX, out minY, out minZ, out maxX, out maxY, out maxZ);
+
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    Vector3 voxelCenterWorld = VoxelCenterToWorld(x, y, z);
+                    Vector3 local = t.InverseTransformPoint(voxelCenterWorld);
+                    if (Vector3.Distance(local, center) <= radius)
+                    {
+                        grid[x + y * gsX + z * gsX * gsY] = 1;
+                    }
+                }
+    }
+
+    private void FillCapsuleCollider(CapsuleCollider capsule)
+    {
+        Vector3 center = capsule.center;
+        float radius = capsule.radius;
+        float height = capsule.height;
+        int direction = capsule.direction;
+        Transform t = capsule.transform;
+
+        float lineHeight = Mathf.Max(0f, height - radius * 2f);
+        Vector3 axis = Vector3.zero;
+        if (direction == 0) axis = Vector3.right;
+        else if (direction == 1) axis = Vector3.up;
+        else axis = Vector3.forward;
+
+        Vector3 p0 = center - axis * (lineHeight * 0.5f);
+        Vector3 p1 = center + axis * (lineHeight * 0.5f);
+
+        int minX, minY, minZ, maxX, maxY, maxZ;
+        BoundsToVoxelRange(capsule.bounds, out minX, out minY, out minZ, out maxX, out maxY, out maxZ);
+
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+        for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    Vector3 voxelCenterWorld = VoxelCenterToWorld(x, y, z);
+                    Vector3 local = t.InverseTransformPoint(voxelCenterWorld);
+                    if (DistancePointToLineSegment(local, p0, p1) <= radius)
+                    {
+                        grid[x + y * gsX + z * gsX * gsY] = 1;
+                    }
+                }
+    }
+
+    private float DistancePointToLineSegment(Vector3 p, Vector3 a, Vector3 b)
+    {
+        Vector3 ab = b - a;
+        float denom = Vector3.Dot(ab, ab);
+        if (denom < 0.0001f) return Vector3.Distance(p, a);
+        float t = Vector3.Dot(p - a, ab) / denom;
+        t = Mathf.Clamp01(t);
+        Vector3 closest = a + ab * t;
+        return Vector3.Distance(p, closest);
     }
 
     private void BuildVoxelData()
