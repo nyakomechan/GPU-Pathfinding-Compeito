@@ -44,8 +44,8 @@ public class VoxelWorld : MonoBehaviour
         int gs = gridSize;
         byte[] g = new byte[gs * gs * gs];
 
-        var colliders = FindObjectsOfType<BoxCollider>();
-        foreach (var col in colliders)
+        var colliders = FindObjectsOfType<Collider>();
+        foreach (Collider col in colliders)
         {
             if (col.transform == transform) continue;
             if (col.gameObject.layer != wallLayer) continue;

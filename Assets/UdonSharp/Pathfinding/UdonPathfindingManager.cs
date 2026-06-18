@@ -10,7 +10,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 {
     [Header("Settings")]
     public Material pathfindMaterial;
-    public BoxCollider[] wallColliders;
+    public Collider[] wallColliders;
     public int gridSizeX = 16;
     public int gridSizeY = 16;
     public int gridSizeZ = 16;
@@ -130,7 +130,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
         for (int c = 0; c < wallColliders.Length; c++)
         {
-            BoxCollider col = wallColliders[c];
+            Collider col = wallColliders[c];
             if (col == null) continue;
 
             Bounds b = col.bounds;
