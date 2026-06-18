@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class UdonPathfindVisualizer : MonoBehaviour
 {
-    private static readonly Color WALL_COLOR = new Color(0.29f, 0.29f, 0.42f, 0.5f);
+    private static readonly Color WALL_COLOR = new Color(1f, 0.25f, 0.25f, 1f);
     private static readonly Color PATH_COLOR = new Color(1f, 0.82f, 0.4f, 1f);
     private static readonly Color START_MARKER_COLOR = new Color(0.02f, 0.84f, 0.63f, 1f);
     private static readonly Color GOAL_MARKER_COLOR = new Color(0.94f, 0.28f, 0.44f, 1f);
@@ -55,15 +55,28 @@ public class UdonPathfindVisualizer : MonoBehaviour
         Destroy(sphereGO);
     }
 
-    private Material CreateTransparentMaterial(Color color, int renderQueue = 3000)
+    private Material CreateMaterial(Color color, int renderQueue = 3000)
     {
-        var mat = new Material(Shader.Find("Standard"));
+        Material mat = new Material(Shader.Find("Standard"));
         mat.color = color;
         mat.enableInstancing = true;
         mat.SetFloat("_Glossiness", 0.1f);
         mat.SetFloat("_Metallic", 0f);
-        if (color.a < 1f)
+
+        if (color.a >= 1f)
         {
+            mat.SetFloat("_Mode", 0f);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+            mat.SetInt("_ZWrite", 1);
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.DisableKeyword("_ALPHABLEND_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.renderQueue = renderQueue;
+        }
+        else
+        {
+            mat.SetFloat("_Mode", 3f);
             mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             mat.SetInt("_ZWrite", 0);
@@ -77,9 +90,9 @@ public class UdonPathfindVisualizer : MonoBehaviour
 
     private void CreateMaterials()
     {
-        wallMat = CreateTransparentMaterial(WALL_COLOR, 2900);
-        startMat = CreateTransparentMaterial(START_MARKER_COLOR, 3100);
-        goalMat = CreateTransparentMaterial(GOAL_MARKER_COLOR, 3100);
+        wallMat = CreateMaterial(WALL_COLOR, 2900);
+        startMat = CreateMaterial(START_MARKER_COLOR, 3100);
+        goalMat = CreateMaterial(GOAL_MARKER_COLOR, 3100);
     }
 
     private bool IsGridDataValid()
@@ -133,7 +146,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
                     if (vi >= 0 && vi < v2l.Length && v2l[vi] == -1)
                     {
                         Vector3 pos = origin + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * cs;
-                        positions.Add(Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * cs));
+                        positions.Add(Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * cs * 0.95f));
                     }
                 }
             }
@@ -175,7 +188,7 @@ public class UdonPathfindVisualizer : MonoBehaviour
         Destroy(border.GetComponent<Collider>());
         border.transform.position = center;
         border.transform.localScale = size;
-        border.GetComponent<Renderer>().material = CreateTransparentMaterial(BORDER_COLOR, 2500);
+        border.GetComponent<Renderer>().material = CreateMaterial(BORDER_COLOR, 2500);
 
         var wireGO = new GameObject("Wireframe");
         var lr = wireGO.AddComponent<LineRenderer>();
