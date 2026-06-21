@@ -877,6 +877,13 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         }
     }
 
+    public byte[] GetGrid() { return grid; }
+    public int GetGridSizeX() { return gridSizeX; }
+    public int GetGridSizeY() { return gridSizeY; }
+    public int GetGridSizeZ() { return gridSizeZ; }
+    public float GetCellSize() { return cellSize; }
+    public Vector3 GetGridOrigin() { return gridOrigin; }
+
     public void OnDestroy()
     {
         DisposeGpuResources();
