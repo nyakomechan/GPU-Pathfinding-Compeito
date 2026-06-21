@@ -16,15 +16,18 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     public int gridSizeZ = 16;
     public float cellSize = 1f;
     public Vector3 gridOrigin = Vector3.zero;
-    public int wallLayer = 6;
+    public LayerMask wallLayer = 1 << 6;
     public float heightFactor = 0.2f;
     public int itersPerFrame = 8;
     public int maxIterations = 1024;
 
-    [Header("Results")]
+    [HideInInspector]
     public bool isBusy;
+    [HideInInspector]
     public bool pathFound;
+    [HideInInspector]
     public string pathError;
+    [HideInInspector]
     public Vector3[] waypoints;
 
     [Header("Events")]
@@ -38,10 +41,12 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     private const int STATE_PATH_PENDING = 3;
 
     private byte[] grid;
+    [HideInInspector]
     public int[] voxelToLeaf;
     private int[] leafVoxelIndex;
     private int[] neighbors;
     private float[] leafCosts;
+    [HideInInspector]
     public int leafCount;
 
     private RenderTexture pathDataA;
@@ -58,12 +63,17 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     private int texHeight;
 
     private DataList requestQueue = new DataList();
-
+    [HideInInspector]
     public int startLeafIdx = -1;
+    [HideInInspector]
     public int goalLeafIdx = -1;
+    [HideInInspector]
     public Vector3 startWorld;
+    [HideInInspector]
     public Vector3 goalWorld;
+    [HideInInspector]
     public int searchIterationCount;
+    [HideInInspector]
     public int searchFrameCount;
     private int currentIteration;
     private int state;
@@ -719,7 +729,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         if (rawPath == null || rawPath.Length == 0) return new Vector3[0];
         if (rawPath.Length == 1) return new Vector3[] { rawPath[0] };
 
-        int wallLayerMask = 1 << wallLayer;
+        int wallLayerMask = wallLayer.value;
         float radius = cellSize * 0.25f;
 
         int smoothCount = 1;

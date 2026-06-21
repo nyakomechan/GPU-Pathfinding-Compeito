@@ -1,9 +1,28 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
 [CustomEditor(typeof(UdonPathfindingManager))]
 public class UdonPathfindingManagerEditor : Editor
 {
+    private static readonly Dictionary<string, string> FieldDescriptions = new Dictionary<string, string>
+    {
+        { "pathfindMaterial", "Compeito material generated from PathfindCompeito shader. / PathfindCompeito シェーダーから生成された Compeito マテリアル。" },
+        { "wallColliders", "Colliders treated as obstacles. Any Collider type is supported. / 障害物として扱うコライダー。任意の Collider タイプに対応。" },
+        { "gridSizeX", "Number of voxel cells along the X axis. / X 軸方向のボクセルセル数。" },
+        { "gridSizeY", "Number of voxel cells along the Y axis. / Y 軸方向のボクセルセル数。" },
+        { "gridSizeZ", "Number of voxel cells along the Z axis. / Z 軸方向のボクセルセル数。" },
+        { "cellSize", "World-space size of one voxel cell. / 1 つのボクセルセルのワールド空間でのサイズ。" },
+        { "gridOrigin", "World position of the grid's minimum corner (0,0,0). / グリッドの最小角 (0,0,0) に対応するワールド座標。" },
+        { "wallLayer", "Layer used for MeshCollider overlap checks. / MeshCollider の重なり判定に使用するレイヤー。" },
+        { "heightFactor", "Cost multiplier for vertical movement. / 垂直方向の移動コストに掛ける係数。" },
+        { "itersPerFrame", "Number of wavefront iterations processed per frame. / 1 フレームあたりに処理する wavefront イテレーション数。" },
+        { "maxIterations", "Upper limit of iterations before giving up. / 探索を諦めるまでの最大イテレーション数。" },
+        { "resultReceiver", "UdonSharpBehaviour that receives the result event. / 結果イベントを受け取る UdonSharpBehaviour。" },
+        { "foundEventName", "Event name called when a path is found. / 経路発見時に呼ばれるイベント名。" },
+        { "failedEventName", "Event name called when a path fails. / 経路失敗時に呼ばれるイベント名。" }
+    };
+
     private const string PrefShowWallVoxels = "UdonPathfindingManagerEditor.ShowWallVoxels";
     private const string PrefMaxPreviewVoxels = "UdonPathfindingManagerEditor.MaxPreviewVoxels";
     private const string PrefEditGridRange = "UdonPathfindingManagerEditor.EditGridRange";
@@ -27,14 +46,42 @@ public class UdonPathfindingManagerEditor : Editor
 
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        serializedObject.Update();
+
+        SerializedProperty prop = serializedObject.GetIterator();
+        bool enterChildren = true;
+        while (prop.NextVisible(enterChildren))
+        {
+            enterChildren = false;
+            if (prop.name == "m_Script") continue;
+
+            if (prop.name == "pathfindMaterial")
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
+            }
+            else if (prop.name == "resultReceiver")
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Events", EditorStyles.boldLabel);
+            }
+
+            if (FieldDescriptions.TryGetValue(prop.name, out string desc))
+            {
+                EditorGUILayout.HelpBox(desc, MessageType.Info);
+            }
+
+            EditorGUILayout.PropertyField(prop, true);
+        }
+
+        serializedObject.ApplyModifiedProperties();
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Scene View", EditorStyles.boldLabel);
 
         EditorGUI.BeginChangeCheck();
-        editGridRange = EditorGUILayout.Toggle("Edit Grid Range", editGridRange);
-        showWallVoxels = EditorGUILayout.Toggle("Show Wall Voxels", showWallVoxels);
+        editGridRange = GUILayout.Toggle(editGridRange,"Edit Grid Range", GUI.skin.button);
+        showWallVoxels =  GUILayout.Toggle(showWallVoxels,"Show Wall Voxels",GUI.skin.button);
         maxPreviewVoxels = EditorGUILayout.IntSlider("Max Preview Voxels", maxPreviewVoxels, 100, 50000);
         if (EditorGUI.EndChangeCheck())
         {
