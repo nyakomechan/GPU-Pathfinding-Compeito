@@ -849,30 +849,30 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     {
         if (neighborTex != null)
         {
-            Destroy(neighborTex);
+            DestroyImmediate(neighborTex);
             neighborTex = null;
         }
         if (costTex != null)
         {
-            Destroy(costTex);
+            DestroyImmediate(costTex);
             costTex = null;
         }
         if (pathDataA != null)
         {
             pathDataA.Release();
-            Destroy(pathDataA);
+            DestroyImmediate(pathDataA);
             pathDataA = null;
         }
         if (pathDataB != null)
         {
             pathDataB.Release();
-            Destroy(pathDataB);
+            DestroyImmediate(pathDataB);
             pathDataB = null;
         }
         if (goalResultTex != null)
         {
             goalResultTex.Release();
-            Destroy(goalResultTex);
+            DestroyImmediate(goalResultTex);
             goalResultTex = null;
         }
     }
