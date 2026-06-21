@@ -8,7 +8,6 @@ using imaginantia.Compeito;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class UdonPathfindingManager : UdonSharpBehaviour
 {
-    [Header("Settings")]
     public Material pathfindMaterial;
     public Collider[] wallColliders;
     public int gridSizeX = 16;
@@ -30,7 +29,6 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     [HideInInspector]
     public Vector3[] waypoints;
 
-    [Header("Events")]
     public UdonSharpBehaviour resultReceiver;
     public string foundEventName = "OnPathFound";
     public string failedEventName = "OnPathFailed";

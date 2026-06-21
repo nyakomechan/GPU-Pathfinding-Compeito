@@ -34,6 +34,10 @@ public class UdonPathfindingManagerEditor : Editor
     private bool editGridRange;
     private bool pendingRebuild;
 
+    private bool searchedMaterial;
+    private Material foundMaterial;
+    private string materialSearchMessage;
+
     private void OnEnable()
     {
         showHelpBox = EditorPrefs.GetBool(PrefShowHelpBox, true);
@@ -47,13 +51,58 @@ public class UdonPathfindingManagerEditor : Editor
         Tools.hidden = false;
     }
 
+    private void SearchPathfindMaterial()
+    {
+        searchedMaterial = true;
+        HashSet<Material> matches = new HashSet<Material>();
+        const string shaderName = "Compeito/Generated/PathfindCompeito";
+
+        string[] materialGuids = AssetDatabase.FindAssets("t:Material");
+        foreach (string guid in materialGuids)
+        {
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(guid));
+            if (mat != null && mat.shader != null && mat.shader.name == shaderName)
+                matches.Add(mat);
+        }
+
+        string[] compeitoGuids = AssetDatabase.FindAssets("PathfindCompeito");
+        foreach (string guid in compeitoGuids)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            if (assets == null) continue;
+            foreach (Object obj in assets)
+            {
+                if (obj is Material mat && mat.shader != null && mat.shader.name == shaderName)
+                    matches.Add(mat);
+            }
+        }
+
+        if (matches.Count == 1)
+        {
+            foreach (Material mat in matches)
+            {
+                foundMaterial = mat;
+                break;
+            }
+        }
+        else if (matches.Count == 0)
+        {
+            materialSearchMessage = "PathfindCompeito material not found. Create a material using the generated shader. / PathfindCompeito マテリアルが見つかりません。生成されたシェーダーを使用してマテリアルを作成してください。";
+        }
+        else
+        {
+            materialSearchMessage = "Multiple PathfindCompeito materials found. Please assign one manually. / PathfindCompeito マテリアルが複数見つかりました。手動で 1 つ割り当ててください。";
+        }
+    }
+
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
 
         SerializedProperty prop = serializedObject.GetIterator();
         EditorGUI.BeginChangeCheck();
-        showHelpBox = GUILayout.Toggle(showHelpBox, showHelpBox ? "HelpBox: ON" : "HelpBox: OFF", GUI.skin.button);
+        showHelpBox = GUILayout.Toggle(showHelpBox, showHelpBox ? "Help/項目説明: ON" : "Help/項目説明: OFF", GUI.skin.button);
         if (EditorGUI.EndChangeCheck())
         {
             EditorPrefs.SetBool(PrefShowHelpBox, showHelpBox);
@@ -68,6 +117,22 @@ public class UdonPathfindingManagerEditor : Editor
             {
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
+
+                SerializedProperty pathfindMaterialProp = serializedObject.FindProperty("pathfindMaterial");
+                if (pathfindMaterialProp.objectReferenceValue == null && !searchedMaterial)
+                {
+                    SearchPathfindMaterial();
+                    if (foundMaterial != null)
+                    {
+                        pathfindMaterialProp.objectReferenceValue = foundMaterial;
+                        serializedObject.ApplyModifiedProperties();
+                        EditorUtility.SetDirty(target);
+                    }
+                }
+                if (pathfindMaterialProp.objectReferenceValue == null && !string.IsNullOrEmpty(materialSearchMessage))
+                {
+                    EditorGUILayout.HelpBox(materialSearchMessage, MessageType.Warning);
+                }
             }
             else if (prop.name == "resultReceiver")
             {
@@ -77,6 +142,8 @@ public class UdonPathfindingManagerEditor : Editor
 
             if (showHelpBox && FieldDescriptions.TryGetValue(prop.name, out string desc))
             {
+                EditorGUILayout.Space();
+                EditorGUILayout.Space();
                 EditorGUILayout.HelpBox(desc, MessageType.Info);
             }
 
@@ -87,7 +154,6 @@ public class UdonPathfindingManagerEditor : Editor
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Inspector", EditorStyles.boldLabel);
-
 
 
         EditorGUILayout.Space();
