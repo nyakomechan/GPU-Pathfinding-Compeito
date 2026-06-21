@@ -154,6 +154,13 @@ public class UdonPathfindingManager : UdonSharpBehaviour
                 continue;
             }
 
+            MeshCollider mesh = col.GetComponent<MeshCollider>();
+            if (mesh != null)
+            {
+                FillMeshCollider(mesh);
+                continue;
+            }
+
             FillColliderBounds(col.bounds);
         }
     }
@@ -289,6 +296,39 @@ public class UdonPathfindingManager : UdonSharpBehaviour
                     Vector3 voxelCenterWorld = VoxelCenterToWorld(x, y, z);
                     Vector3 local = t.InverseTransformPoint(voxelCenterWorld);
                     if (DistancePointToLineSegment(local, p0, p1) <= radius)
+                    {
+                        grid[x + y * gsX + z * gsX * gsY] = 1;
+                    }
+                }
+    }
+
+    private void FillMeshCollider(MeshCollider mesh)
+    {
+        int minX, minY, minZ, maxX, maxY, maxZ;
+        BoundsToVoxelRange(mesh.bounds, out minX, out minY, out minZ, out maxX, out maxY, out maxZ);
+
+        int gsX = gridSizeX;
+        int gsY = gridSizeY;
+
+        Vector3 halfExtents = new Vector3(cellSize, cellSize, cellSize) * 0.5f;
+        Collider[] overlapResults = new Collider[16];
+
+        for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    Vector3 center = VoxelCenterToWorld(x, y, z);
+                    int hitCount = Physics.OverlapBoxNonAlloc(center, halfExtents, overlapResults, Quaternion.identity);
+                    bool overlaps = false;
+                    for (int i = 0; i < hitCount; i++)
+                    {
+                        if (overlapResults[i] == mesh)
+                        {
+                            overlaps = true;
+                            break;
+                        }
+                    }
+                    if (overlaps)
                     {
                         grid[x + y * gsX + z * gsX * gsY] = 1;
                     }
