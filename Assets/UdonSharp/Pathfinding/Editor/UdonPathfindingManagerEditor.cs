@@ -7,7 +7,6 @@ public class UdonPathfindingManagerEditor : Editor
 {
     private static readonly Dictionary<string, string> FieldDescriptions = new Dictionary<string, string>
     {
-        { "pathfindMaterial", "Compeito material generated from PathfindCompeito shader. / PathfindCompeito シェーダーから生成された Compeito マテリアル。" },
         { "wallColliders", "Colliders treated as obstacles. Any Collider type is supported. / 障害物として扱うコライダー。任意の Collider タイプに対応。" },
         { "gridSizeX", "Number of voxel cells along the X axis. / X 軸方向のボクセルセル数。" },
         { "gridSizeY", "Number of voxel cells along the Y axis. / Y 軸方向のボクセルセル数。" },
@@ -153,11 +152,8 @@ public class UdonPathfindingManagerEditor : Editor
         serializedObject.ApplyModifiedProperties();
 
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Inspector", EditorStyles.boldLabel);
-
-
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Scene View", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Navigation Area Settings");
 
         EditorGUI.BeginChangeCheck();
         editGridRange = GUILayout.Toggle(editGridRange,"Edit Grid Range", GUI.skin.button);
@@ -179,6 +175,7 @@ public class UdonPathfindingManagerEditor : Editor
             UdonPathfindingManager manager = (UdonPathfindingManager)target;
             Undo.RecordObject(manager, "Rebuild Pathfinding Grid");
             manager.Rebuild();
+            showWallVoxels = true;
             EditorUtility.SetDirty(manager);
             SceneView.RepaintAll();
         }

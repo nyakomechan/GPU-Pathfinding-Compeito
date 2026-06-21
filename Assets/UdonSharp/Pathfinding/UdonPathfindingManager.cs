@@ -8,14 +8,15 @@ using imaginantia.Compeito;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class UdonPathfindingManager : UdonSharpBehaviour
 {
+    [HideInInspector]
     public Material pathfindMaterial;
     public Collider[] wallColliders;
+    public int wallLayer = 1 << 6;
     public int gridSizeX = 16;
     public int gridSizeY = 16;
     public int gridSizeZ = 16;
     public float cellSize = 1f;
     public Vector3 gridOrigin = Vector3.zero;
-    public LayerMask wallLayer = 1 << 6;
     public float heightFactor = 0.2f;
     public int itersPerFrame = 8;
     public int maxIterations = 1024;
@@ -124,6 +125,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         pathFound = false;
         pathError = "";
         state = STATE_IDLE;
+        Debug.Log("[UdonPathfindingManager] Rebuild complete. Leaf count: " + leafCount);
     }
 
     private void BuildGrid()
@@ -531,6 +533,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         return token.String;
     }
 
+    [RecursiveMethod]
     private void ProcessQueue()
     {
         if (isBusy || requestQueue.Count == 0) return;
@@ -552,7 +555,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         requestFailedEvent = ReadString(request, "failed");
         StartPathSearch();
     }
-
+    [RecursiveMethod]
     private void StartPathSearch()
     {
         startWorld = requestStart;
@@ -727,7 +730,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         if (rawPath == null || rawPath.Length == 0) return new Vector3[0];
         if (rawPath.Length == 1) return new Vector3[] { rawPath[0] };
 
-        int wallLayerMask = wallLayer.value;
+        int wallLayerMask = wallLayer;
         float radius = cellSize * 0.25f;
 
         int smoothCount = 1;

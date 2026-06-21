@@ -1,22 +1,14 @@
-using UdonSharp;
 using UnityEngine;
 
-public class UdonPathfindVisualizer : UdonSharpBehaviour
+public class UdonPathfindVisualizerMono : MonoBehaviour
 {
-    [Header("References")]
+    private static readonly Color WALL_COLOR = new Color(1f, 0.25f, 0.25f, 1f);
+    private static readonly Color PATH_COLOR = new Color(1f, 0.82f, 0.4f, 1f);
+    private static readonly Color START_MARKER_COLOR = new Color(0.02f, 0.84f, 0.63f, 1f);
+    private static readonly Color GOAL_MARKER_COLOR = new Color(0.94f, 0.28f, 0.44f, 1f);
+    private static readonly Color BORDER_COLOR = new Color(0.2f, 0.2f, 0.33f, 0.3f);
+
     public UdonPathfindingManager manager;
-
-    [Header("Options")]
-    public bool showWalls = true;
-    public bool showPath = true;
-    public bool showMarkers = true;
-    public bool showBorder = true;
-
-    private Color wallColor;
-    private Color pathColor;
-    private Color startMarkerColor;
-    private Color goalMarkerColor;
-    private Color borderColor;
 
     private Mesh cubeMesh;
     private Mesh sphereMesh;
@@ -38,12 +30,6 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
 
     void Start()
     {
-        wallColor = new Color(1f, 0.25f, 0.25f, 1f);
-        pathColor = new Color(1f, 0.82f, 0.4f, 1f);
-        startMarkerColor = new Color(0.02f, 0.84f, 0.63f, 1f);
-        goalMarkerColor = new Color(0.94f, 0.28f, 0.44f, 1f);
-        borderColor = new Color(0.2f, 0.2f, 0.33f, 0.3f);
-
         if (manager == null)
         {
             Debug.LogWarning("UdonPathfindVisualizer: manager is not assigned");
@@ -53,25 +39,23 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
 
         CreateMeshes();
         CreateMaterials();
+        StartCoroutine(InitializeWallInstancesCoroutine());
         CreateMarkers();
-        if (showBorder)
-        {
-            CreateBorderFrame();
-        }
+        CreateBorderFrame();
     }
 
     private void CreateMeshes()
     {
-        GameObject cubeGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        var cubeGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
         cubeMesh = cubeGO.GetComponent<MeshFilter>().sharedMesh;
         Destroy(cubeGO);
 
-        GameObject sphereGO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        var sphereGO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sphereMesh = sphereGO.GetComponent<MeshFilter>().sharedMesh;
         Destroy(sphereGO);
     }
 
-    private Material CreateMaterial(Color color, int renderQueue)
+    private Material CreateMaterial(Color color, int renderQueue = 3000)
     {
         Material mat = new Material(Shader.Find("Standard"));
         mat.color = color;
@@ -82,8 +66,8 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
         if (color.a >= 1f)
         {
             mat.SetFloat("_Mode", 0f);
-            mat.SetInt("_SrcBlend", 1);
-            mat.SetInt("_DstBlend", 0);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
             mat.SetInt("_ZWrite", 1);
             mat.DisableKeyword("_ALPHATEST_ON");
             mat.DisableKeyword("_ALPHABLEND_ON");
@@ -106,42 +90,52 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
 
     private void CreateMaterials()
     {
-        wallMat = CreateMaterial(wallColor, 2900);
-        startMat = CreateMaterial(startMarkerColor, 3100);
-        goalMat = CreateMaterial(goalMarkerColor, 3100);
+        wallMat = CreateMaterial(WALL_COLOR, 2900);
+        startMat = CreateMaterial(START_MARKER_COLOR, 3100);
+        goalMat = CreateMaterial(GOAL_MARKER_COLOR, 3100);
     }
 
     private bool IsGridDataValid()
     {
         if (manager == null) return false;
-        byte[] grid = manager.GetGrid();
-        if (grid == null) return false;
-        int expected = manager.GetGridSizeX() * manager.GetGridSizeY() * manager.GetGridSizeZ();
-        return grid.Length == expected;
+        int[] v2l = manager.voxelToLeaf;
+        if (v2l == null) return false;
+        int expected = manager.gridSizeX * manager.gridSizeY * manager.gridSizeZ;
+        return v2l.Length == expected;
     }
 
-    private void InitializeWallInstances()
+    private System.Collections.IEnumerator InitializeWallInstancesCoroutine()
     {
-        if (wallInstancesInitialized) return;
-        if (!IsGridDataValid()) return;
-
-        int gsX = manager.GetGridSizeX();
-        int gsY = manager.GetGridSizeY();
-        int gsZ = manager.GetGridSizeZ();
-        float cs = manager.GetCellSize();
-        Vector3 origin = manager.GetGridOrigin();
-
-        byte[] grid = manager.GetGrid();
-        int total = grid.Length;
-
-        int count = 0;
-        for (int i = 0; i < total; i++)
+        int attempts = 0;
+        while (!IsGridDataValid() && attempts < 60)
         {
-            if (grid[i] != 0) count++;
+            attempts++;
+            yield return null;
         }
 
-        wallMatrices = new Matrix4x4[count];
-        int idx = 0;
+        if (IsGridDataValid())
+        {
+            CreateWallInstances();
+            wallInstancesInitialized = true;
+        }
+        else
+        {
+            Debug.LogWarning("UdonPathfindVisualizer: manager voxel data is not valid after waiting");
+        }
+    }
+
+    private void CreateWallInstances()
+    {
+        int gsX = manager.gridSizeX;
+        int gsY = manager.gridSizeY;
+        int gsZ = manager.gridSizeZ;
+        float cs = manager.cellSize;
+        Vector3 origin = manager.gridOrigin;
+
+        int[] v2l = manager.voxelToLeaf;
+        if (v2l == null) return;
+
+        var positions = new System.Collections.Generic.List<Matrix4x4>();
         for (int z = 0; z < gsZ; z++)
         {
             for (int y = 0; y < gsY; y++)
@@ -149,21 +143,21 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
                 for (int x = 0; x < gsX; x++)
                 {
                     int vi = x + y * gsX + z * gsX * gsY;
-                    if (grid[vi] != 0)
+                    if (vi >= 0 && vi < v2l.Length && v2l[vi] == -1)
                     {
                         Vector3 pos = origin + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * cs;
-                        wallMatrices[idx++] = Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * cs * 0.95f);
+                        positions.Add(Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * cs * 0.95f));
                     }
                 }
             }
         }
-        wallCount = count;
-        wallInstancesInitialized = true;
+        wallCount = positions.Count;
+        wallMatrices = positions.ToArray();
     }
 
     private void CreateMarkers()
     {
-        float markerScale = manager.GetCellSize() * 0.5f;
+        float markerScale = manager.cellSize * 0.5f;
 
         startMarkerObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         Destroy(startMarkerObj.GetComponent<Collider>());
@@ -180,58 +174,54 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
 
     private void CreateBorderFrame()
     {
-        int gsX = manager.GetGridSizeX();
-        int gsY = manager.GetGridSizeY();
-        int gsZ = manager.GetGridSizeZ();
-        float cs = manager.GetCellSize();
-        Vector3 origin = manager.GetGridOrigin();
+        int gsX = manager.gridSizeX;
+        int gsY = manager.gridSizeY;
+        int gsZ = manager.gridSizeZ;
+        float cs = manager.cellSize;
+        Vector3 origin = manager.gridOrigin;
 
         Vector3 size = new Vector3(gsX * cs, gsY * cs, gsZ * cs);
         Vector3 max = origin + size;
         Vector3 center = origin + size * 0.5f;
 
-        GameObject border = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        var border = GameObject.CreatePrimitive(PrimitiveType.Cube);
         Destroy(border.GetComponent<Collider>());
         border.transform.position = center;
         border.transform.localScale = size;
-        border.GetComponent<Renderer>().material = CreateMaterial(borderColor, 2500);
+        border.GetComponent<Renderer>().material = CreateMaterial(BORDER_COLOR, 2500);
 
-        GameObject wireGO = new GameObject("Wireframe");
-        LineRenderer lr = wireGO.AddComponent<LineRenderer>();
+        var wireGO = new GameObject("Wireframe");
+        var lr = wireGO.AddComponent<LineRenderer>();
         lr.positionCount = 24;
         lr.startWidth = 0.03f * cs;
         lr.endWidth = 0.03f * cs;
         lr.material = new Material(Shader.Find("Unlit/Color"));
         lr.material.color = new Color(0.2f, 0.2f, 0.33f, 0.6f);
 
-        Vector3 c0 = origin;
-        Vector3 c1 = new Vector3(max.x, origin.y, origin.z);
-        Vector3 c2 = new Vector3(max.x, origin.y, max.z);
-        Vector3 c3 = new Vector3(origin.x, origin.y, max.z);
-        Vector3 c4 = new Vector3(origin.x, max.y, origin.z);
-        Vector3 c5 = new Vector3(max.x, max.y, origin.z);
-        Vector3 c6 = max;
-        Vector3 c7 = new Vector3(origin.x, max.y, max.z);
+        Vector3[] corners = new Vector3[]
+        {
+            origin,
+            new Vector3(max.x, origin.y, origin.z),
+            new Vector3(max.x, origin.y, max.z),
+            new Vector3(origin.x, origin.y, max.z),
+            new Vector3(origin.x, max.y, origin.z),
+            new Vector3(max.x, max.y, origin.z),
+            max,
+            new Vector3(origin.x, max.y, max.z),
+        };
 
-        Vector3[] lines = new Vector3[24];
-        lines[0] = c0; lines[1] = c1;
-        lines[2] = c1; lines[3] = c2;
-        lines[4] = c2; lines[5] = c3;
-        lines[6] = c3; lines[7] = c0;
-        lines[8] = c4; lines[9] = c5;
-        lines[10] = c5; lines[11] = c6;
-        lines[12] = c6; lines[13] = c7;
-        lines[14] = c7; lines[15] = c4;
-        lines[16] = c0; lines[17] = c4;
-        lines[18] = c1; lines[19] = c5;
-        lines[20] = c2; lines[21] = c6;
-        lines[22] = c3; lines[23] = c7;
+        Vector3[] lines = new Vector3[]
+        {
+            corners[0], corners[1], corners[1], corners[2], corners[2], corners[3], corners[3], corners[0],
+            corners[4], corners[5], corners[5], corners[6], corners[6], corners[7], corners[7], corners[4],
+            corners[0], corners[4], corners[1], corners[5], corners[2], corners[6], corners[3], corners[7],
+        };
         lr.SetPositions(lines);
     }
 
     private void LateUpdate()
     {
-        if (!showWalls || !wallInstancesInitialized) return;
+        if (!wallInstancesInitialized) return;
         RenderInstanced(wallMatrices, wallCount, wallMat);
     }
 
@@ -239,31 +229,8 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
     {
         if (manager == null) return;
 
-        if (!wallInstancesInitialized)
-        {
-            InitializeWallInstances();
-        }
-
-        if (showPath)
-        {
-            UpdatePathLine(manager.waypoints);
-        }
-        else if (pathLineObj != null)
-        {
-            Destroy(pathLineObj.gameObject);
-            pathLineObj = null;
-            lastWaypoints = null;
-        }
-
-        if (showMarkers)
-        {
-            UpdateMarkers();
-        }
-        else
-        {
-            if (startMarkerObj != null) startMarkerObj.SetActive(false);
-            if (goalMarkerObj != null) goalMarkerObj.SetActive(false);
-        }
+        UpdatePathLine(manager.waypoints);
+        UpdateMarkers();
     }
 
     private void RenderInstanced(Matrix4x4[] matrices, int count, Material mat)
@@ -319,10 +286,10 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
         GameObject go = new GameObject("PathLine");
         pathLineObj = go.AddComponent<LineRenderer>();
         pathLineObj.positionCount = waypoints.Length;
-        pathLineObj.startWidth = 0.15f * manager.GetCellSize();
-        pathLineObj.endWidth = 0.15f * manager.GetCellSize();
+        pathLineObj.startWidth = 0.15f * manager.cellSize;
+        pathLineObj.endWidth = 0.15f * manager.cellSize;
         pathLineObj.material = new Material(Shader.Find("Unlit/Color"));
-        pathLineObj.material.color = pathColor;
+        pathLineObj.material.color = PATH_COLOR;
 
         for (int i = 0; i < waypoints.Length; i++)
         {
@@ -330,7 +297,7 @@ public class UdonPathfindVisualizer : UdonSharpBehaviour
         }
     }
 
-    public void OnDestroy()
+    private void OnDestroy()
     {
         if (wallMat != null) Destroy(wallMat);
         if (startMat != null) Destroy(startMat);
