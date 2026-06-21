@@ -23,10 +23,12 @@ public class UdonPathfindingManagerEditor : Editor
         { "failedEventName", "Event name called when a path fails. / 経路失敗時に呼ばれるイベント名。" }
     };
 
+    private const string PrefShowHelpBox = "UdonPathfindingManagerEditor.ShowHelpBox";
     private const string PrefShowWallVoxels = "UdonPathfindingManagerEditor.ShowWallVoxels";
     private const string PrefMaxPreviewVoxels = "UdonPathfindingManagerEditor.MaxPreviewVoxels";
     private const string PrefEditGridRange = "UdonPathfindingManagerEditor.EditGridRange";
 
+    private bool showHelpBox = true;
     private bool showWallVoxels = true;
     private int maxPreviewVoxels = 10000;
     private bool editGridRange;
@@ -34,6 +36,7 @@ public class UdonPathfindingManagerEditor : Editor
 
     private void OnEnable()
     {
+        showHelpBox = EditorPrefs.GetBool(PrefShowHelpBox, true);
         showWallVoxels = EditorPrefs.GetBool(PrefShowWallVoxels, true);
         maxPreviewVoxels = EditorPrefs.GetInt(PrefMaxPreviewVoxels, 10000);
         editGridRange = EditorPrefs.GetBool(PrefEditGridRange, false);
@@ -49,6 +52,12 @@ public class UdonPathfindingManagerEditor : Editor
         serializedObject.Update();
 
         SerializedProperty prop = serializedObject.GetIterator();
+        EditorGUI.BeginChangeCheck();
+        showHelpBox = GUILayout.Toggle(showHelpBox, showHelpBox ? "HelpBox: ON" : "HelpBox: OFF", GUI.skin.button);
+        if (EditorGUI.EndChangeCheck())
+        {
+            EditorPrefs.SetBool(PrefShowHelpBox, showHelpBox);
+        }
         bool enterChildren = true;
         while (prop.NextVisible(enterChildren))
         {
@@ -66,7 +75,7 @@ public class UdonPathfindingManagerEditor : Editor
                 EditorGUILayout.LabelField("Events", EditorStyles.boldLabel);
             }
 
-            if (FieldDescriptions.TryGetValue(prop.name, out string desc))
+            if (showHelpBox && FieldDescriptions.TryGetValue(prop.name, out string desc))
             {
                 EditorGUILayout.HelpBox(desc, MessageType.Info);
             }
@@ -75,6 +84,11 @@ public class UdonPathfindingManagerEditor : Editor
         }
 
         serializedObject.ApplyModifiedProperties();
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Inspector", EditorStyles.boldLabel);
+
+
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Scene View", EditorStyles.boldLabel);
