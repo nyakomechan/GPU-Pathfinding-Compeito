@@ -6,15 +6,23 @@ public class UdonPathfindingManagerEditor : Editor
 {
     private const string PrefShowWallVoxels = "UdonPathfindingManagerEditor.ShowWallVoxels";
     private const string PrefMaxPreviewVoxels = "UdonPathfindingManagerEditor.MaxPreviewVoxels";
+    private const string PrefEditGridRange = "UdonPathfindingManagerEditor.EditGridRange";
 
     private bool showWallVoxels = true;
     private int maxPreviewVoxels = 10000;
+    private bool editGridRange;
     private bool pendingRebuild;
 
     private void OnEnable()
     {
         showWallVoxels = EditorPrefs.GetBool(PrefShowWallVoxels, true);
         maxPreviewVoxels = EditorPrefs.GetInt(PrefMaxPreviewVoxels, 10000);
+        editGridRange = EditorPrefs.GetBool(PrefEditGridRange, false);
+    }
+
+    private void OnDisable()
+    {
+        Tools.hidden = false;
     }
 
     public override void OnInspectorGUI()
@@ -25,12 +33,16 @@ public class UdonPathfindingManagerEditor : Editor
         EditorGUILayout.LabelField("Scene View", EditorStyles.boldLabel);
 
         EditorGUI.BeginChangeCheck();
+        editGridRange = EditorGUILayout.Toggle("Edit Grid Range", editGridRange);
         showWallVoxels = EditorGUILayout.Toggle("Show Wall Voxels", showWallVoxels);
         maxPreviewVoxels = EditorGUILayout.IntSlider("Max Preview Voxels", maxPreviewVoxels, 100, 50000);
         if (EditorGUI.EndChangeCheck())
         {
+            EditorPrefs.SetBool(PrefEditGridRange, editGridRange);
             EditorPrefs.SetBool(PrefShowWallVoxels, showWallVoxels);
             EditorPrefs.SetInt(PrefMaxPreviewVoxels, maxPreviewVoxels);
+            if (!editGridRange)
+                Tools.hidden = false;
             SceneView.RepaintAll();
         }
 
@@ -50,6 +62,8 @@ public class UdonPathfindingManagerEditor : Editor
         UdonPathfindingManager manager = (UdonPathfindingManager)target;
         if (manager == null) return;
 
+        Tools.hidden = editGridRange;
+
         float cellSize = manager.GetCellSize();
         if (cellSize <= 0f) return;
 
@@ -68,49 +82,52 @@ public class UdonPathfindingManagerEditor : Editor
         Handles.color = Color.yellow;
         Handles.DrawWireCube(center, size);
 
-        EditorGUI.BeginChangeCheck();
-        Handles.color = Color.blue;
-        Vector3 newMin = Handles.PositionHandle(min, Quaternion.identity);
-        Handles.color = Color.red;
-        Vector3 newMax = Handles.PositionHandle(max, Quaternion.identity);
-
-        if (EditorGUI.EndChangeCheck())
+        if (editGridRange)
         {
-            newMin = SnapToCell(newMin, cellSize);
-            newMax = SnapToCell(newMax, cellSize);
+            EditorGUI.BeginChangeCheck();
+            Handles.color = Color.blue;
+            Vector3 newMin = Handles.PositionHandle(min, Quaternion.identity);
+            Handles.color = Color.red;
+            Vector3 newMax = Handles.PositionHandle(max, Quaternion.identity);
 
-            if (newMax.x < newMin.x + cellSize) newMax.x = newMin.x + cellSize;
-            if (newMax.y < newMin.y + cellSize) newMax.y = newMin.y + cellSize;
-            if (newMax.z < newMin.z + cellSize) newMax.z = newMin.z + cellSize;
+            if (EditorGUI.EndChangeCheck())
+            {
+                newMin = SnapToCell(newMin, cellSize);
+                newMax = SnapToCell(newMax, cellSize);
 
-            Vector3 newOrigin = newMin;
-            int newSizeX = Mathf.Max(1, Mathf.RoundToInt((newMax.x - newMin.x) / cellSize));
-            int newSizeY = Mathf.Max(1, Mathf.RoundToInt((newMax.y - newMin.y) / cellSize));
-            int newSizeZ = Mathf.Max(1, Mathf.RoundToInt((newMax.z - newMin.z) / cellSize));
+                if (newMax.x < newMin.x + cellSize) newMax.x = newMin.x + cellSize;
+                if (newMax.y < newMin.y + cellSize) newMax.y = newMin.y + cellSize;
+                if (newMax.z < newMin.z + cellSize) newMax.z = newMin.z + cellSize;
 
-            Undo.RecordObject(manager, "Change Pathfinding Grid");
-            manager.gridOrigin = newOrigin;
-            manager.gridSizeX = newSizeX;
-            manager.gridSizeY = newSizeY;
-            manager.gridSizeZ = newSizeZ;
-            EditorUtility.SetDirty(manager);
-            pendingRebuild = true;
+                Vector3 newOrigin = newMin;
+                int newSizeX = Mathf.Max(1, Mathf.RoundToInt((newMax.x - newMin.x) / cellSize));
+                int newSizeY = Mathf.Max(1, Mathf.RoundToInt((newMax.y - newMin.y) / cellSize));
+                int newSizeZ = Mathf.Max(1, Mathf.RoundToInt((newMax.z - newMin.z) / cellSize));
+
+                Undo.RecordObject(manager, "Change Pathfinding Grid");
+                manager.gridOrigin = newOrigin;
+                manager.gridSizeX = newSizeX;
+                manager.gridSizeY = newSizeY;
+                manager.gridSizeZ = newSizeZ;
+                EditorUtility.SetDirty(manager);
+                pendingRebuild = true;
+            }
+
+            if (pendingRebuild && Event.current.type == EventType.MouseUp && Event.current.button == 0)
+            {
+                manager.Rebuild();
+                pendingRebuild = false;
+                Event.current.Use();
+                SceneView.RepaintAll();
+            }
+
+            float capSize = HandleUtility.GetHandleSize(min) * 0.12f;
+            Handles.color = Color.blue;
+            Handles.CubeHandleCap(0, min, Quaternion.identity, capSize, EventType.Repaint);
+            capSize = HandleUtility.GetHandleSize(max) * 0.12f;
+            Handles.color = Color.red;
+            Handles.CubeHandleCap(0, max, Quaternion.identity, capSize, EventType.Repaint);
         }
-
-        if (pendingRebuild && Event.current.type == EventType.MouseUp && Event.current.button == 0)
-        {
-            manager.Rebuild();
-            pendingRebuild = false;
-            Event.current.Use();
-            SceneView.RepaintAll();
-        }
-
-        float capSize = HandleUtility.GetHandleSize(min) * 0.12f;
-        Handles.color = Color.blue;
-        Handles.CubeHandleCap(0, min, Quaternion.identity, capSize, EventType.Repaint);
-        capSize = HandleUtility.GetHandleSize(max) * 0.12f;
-        Handles.color = Color.red;
-        Handles.CubeHandleCap(0, max, Quaternion.identity, capSize, EventType.Repaint);
 
         if (showWallVoxels)
         {
