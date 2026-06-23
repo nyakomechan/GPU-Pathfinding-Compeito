@@ -1,5 +1,6 @@
 using UdonSharp;
 using UnityEngine;
+using TMPro;
 
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class UdonPathfindDemo : UdonSharpBehaviour
@@ -22,6 +23,8 @@ public class UdonPathfindDemo : UdonSharpBehaviour
     private int frameCount;
     private bool triggered;
 
+    [SerializeField]
+    TMPro.TMP_Text debugText;
     void Start()
     {
         if (manager != null)
@@ -48,10 +51,6 @@ public class UdonPathfindDemo : UdonSharpBehaviour
             }
         }
 
-        if (Input.GetKeyDown(manualTriggerKey))
-        {
-            RequestDemoPath();
-        }
     }
 
     public void RequestDemoPath()
@@ -72,6 +71,7 @@ public class UdonPathfindDemo : UdonSharpBehaviour
         else
         {
             Debug.Log(string.Format("[UdonPathfindDemo] Requesting path: {0} -> {1}", start, goal));
+            debugText.text = string.Format("[UdonPathfindDemo] Requesting path: {0} -> {1}", start, goal);
             manager.RequestPath(start, goal);
         }
     }
@@ -86,6 +86,7 @@ public class UdonPathfindDemo : UdonSharpBehaviour
             for (int i = 0; i < manager.waypoints.Length; i++)
             {
                 Debug.Log(string.Format("[UdonPathfindDemo] waypoint[{0}] = {1}", i, manager.waypoints[i]));
+                debugText.text = string.Format("waypoint[{0}] = {1}\n", i, manager.waypoints[i]);
             }
         }
     }
@@ -95,5 +96,12 @@ public class UdonPathfindDemo : UdonSharpBehaviour
         if (manager == null) return;
 
         Debug.LogWarning(string.Format("[UdonPathfindDemo] Path failed: {0}", manager.pathError));
+        debugText.text = string.Format("[UdonPathfindDemo] Path failed: {0}", manager.pathError);
+    }
+
+    public override void Interact()
+    {
+        Debug.Log("[UdonPathfindDemo] Interact called, requesting path");
+        RequestDemoPath();
     }
 }
