@@ -11,7 +11,6 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     [HideInInspector]
     public Material pathfindMaterial;
     public Collider[] wallColliders;
-    public int wallLayer = 1 << 6;
     public int gridSizeX = 16;
     public int gridSizeY = 16;
     public int gridSizeZ = 16;
@@ -89,6 +88,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
 
     private int[] reconstructBuffer;
     private Vector3[] smoothBuffer;
+    private int wallLayerMask;
 
     private int[] dirX = new int[] { 1, -1, 0, 0, 0, 0 };
     private int[] dirY = new int[] { 0, 0, 1, -1, 0, 0 };
@@ -136,7 +136,17 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         int total = gsX * gsY * gsZ;
         grid = new byte[total];
 
+        wallLayerMask = 0;
         if (wallColliders == null) return;
+
+        for (int c = 0; c < wallColliders.Length; c++)
+        {
+            Collider col = wallColliders[c];
+            if (col != null)
+            {
+                wallLayerMask |= (1 << col.gameObject.layer);
+            }
+        }
 
         for (int c = 0; c < wallColliders.Length; c++)
         {
@@ -730,7 +740,7 @@ public class UdonPathfindingManager : UdonSharpBehaviour
         if (rawPath == null || rawPath.Length == 0) return new Vector3[0];
         if (rawPath.Length == 1) return new Vector3[] { rawPath[0] };
 
-        int wallLayerMask = wallLayer;
+        int wallLayerMask = this.wallLayerMask;
         float radius = cellSize * 0.25f;
 
         int smoothCount = 1;
@@ -894,6 +904,287 @@ public class UdonPathfindingManager : UdonSharpBehaviour
     public int GetGridSizeZ() { return gridSizeZ; }
     public float GetCellSize() { return cellSize; }
     public Vector3 GetGridOrigin() { return gridOrigin; }
+
+    // ===== Path Utility API (stateless, take wps as argument) =====
+
+    public float GetPathLength(Vector3[] wps)
+    {
+        if (wps == null || wps.Length < 2) return 0f;
+        float total = 0f;
+        for (int i = 0; i < wps.Length - 1; i++)
+        {
+            total += Vector3.Distance(wps[i], wps[i + 1]);
+        }
+        return total;
+    }
+
+    public Vector3 GetClosestPointOnPath(Vector3[] wps, Vector3 worldPos)
+    {
+        if (wps == null || wps.Length == 0) return worldPos;
+        if (wps.Length == 1) return wps[0];
+
+        float bestDist = 1e9f;
+        Vector3 bestPoint = wps[0];
+        for (int i = 0; i < wps.Length - 1; i++)
+        {
+            Vector3 cp = ClosestPointOnSegment(worldPos, wps[i], wps[i + 1]);
+            float d = Vector3.Distance(worldPos, cp);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestPoint = cp;
+            }
+        }
+        return bestPoint;
+    }
+
+    public int GetClosestWaypointIndex(Vector3[] wps, Vector3 worldPos)
+    {
+        if (wps == null || wps.Length == 0) return -1;
+        float bestDist = 1e9f;
+        int bestIdx = -1;
+        for (int i = 0; i < wps.Length; i++)
+        {
+            float d = Vector3.Distance(worldPos, wps[i]);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    public Vector3[] ResamplePath(Vector3[] wps, float spacing)
+    {
+        if (wps == null || wps.Length == 0) return new Vector3[0];
+        int n = wps.Length;
+        if (n == 1) return new Vector3[] { wps[0] };
+
+        if (spacing <= 0f) spacing = cellSize;
+        if (spacing < 0.0001f) spacing = 0.0001f;
+
+        float totalLen = GetPathLength(wps);
+        if (totalLen < 0.0001f) return new Vector3[] { wps[0] };
+
+        int maxCount = Mathf.FloorToInt(totalLen / spacing) + 2;
+        Vector3[] tmp = new Vector3[maxCount];
+        int ri = 0;
+        tmp[ri] = wps[0];
+        ri++;
+
+        float targetDist = spacing;
+        float traveled = 0f;
+        for (int i = 0; i < n - 1; i++)
+        {
+            Vector3 a = wps[i];
+            Vector3 b = wps[i + 1];
+            float segLen = Vector3.Distance(a, b);
+            if (segLen < 0.0001f) continue;
+
+            float segEnd = traveled + segLen;
+            while (targetDist <= segEnd - 0.0001f && ri < maxCount)
+            {
+                float localT = (targetDist - traveled) / segLen;
+                if (localT < 0f) localT = 0f;
+                if (localT > 1f) localT = 1f;
+                tmp[ri] = a + (b - a) * localT;
+                ri++;
+                targetDist += spacing;
+            }
+            traveled = segEnd;
+        }
+
+        Vector3 endP = wps[n - 1];
+        if (ri == 0 || Vector3.Distance(tmp[ri - 1], endP) > spacing * 0.01f)
+        {
+            if (ri < maxCount)
+            {
+                tmp[ri] = endP;
+                ri++;
+            }
+        }
+
+        Vector3[] result = new Vector3[ri];
+        for (int i = 0; i < ri; i++) result[i] = tmp[i];
+        return result;
+    }
+
+    // ===== Waypoint progress helpers (stateless, take index as argument) =====
+
+    public Vector3 GetCurrentWaypoint(Vector3[] wps, int index)
+    {
+        if (wps == null || wps.Length == 0) return Vector3.zero;
+        if (index < 0 || index >= wps.Length) return Vector3.zero;
+        return wps[index];
+    }
+
+    public float GetRemainingDistance(Vector3[] wps, int index)
+    {
+        if (wps == null || wps.Length < 2) return 0f;
+        if (index < 0 || index >= wps.Length) return 0f;
+        float total = 0f;
+        for (int i = index; i < wps.Length - 1; i++)
+        {
+            total += Vector3.Distance(wps[i], wps[i + 1]);
+        }
+        return total;
+    }
+
+    public float GetProgress(Vector3[] wps, int index)
+    {
+        if (wps == null || wps.Length < 2) return 0f;
+        float total = GetPathLength(wps);
+        if (total < 0.0001f) return 0f;
+        float remaining = GetRemainingDistance(wps, index);
+        float traversed = total - remaining;
+        return Mathf.Clamp01(traversed / total);
+    }
+
+    public int AdvanceWaypoint(int index, int waypointCount)
+    {
+        if (waypointCount <= 0) return -1;
+        if (index < 0 || index >= waypointCount - 1) return -1;
+        return index + 1;
+    }
+
+    public int ResetWaypointProgress(int waypointCount)
+    {
+        if (waypointCount <= 0) return 0;
+        return (waypointCount > 1) ? 1 : 0;
+    }
+
+    // ===== Follow target (snap to nearest point, then advance along path) =====
+
+    public Vector3 GetFollowTarget(Vector3[] wps, Vector3 currentPos)
+    {
+        if (wps == null || wps.Length == 0) return currentPos;
+
+        float snapDist = cellSize * 0.5f;
+        float reachDist = cellSize * 0.5f;
+        int last = wps.Length - 1;
+
+        // Snap phase: move toward closest point on path
+        Vector3 cp = GetClosestPointOnPath(wps, currentPos);
+        if (Vector3.Distance(currentPos, cp) > snapDist)
+        {
+            return cp;
+        }
+
+        // On path: determine forward direction from closest segment
+        int segStart = GetClosestSegmentIndex(wps, currentPos);
+        int forwardIdx = segStart + 1;
+        if (forwardIdx > last) forwardIdx = last;
+
+        // If we've reached the forward waypoint, advance to the next
+        if (Vector3.Distance(currentPos, wps[forwardIdx]) <= reachDist)
+        {
+            if (forwardIdx >= last) return wps[last];
+            return wps[forwardIdx + 1];
+        }
+
+        return wps[forwardIdx];
+    }
+
+    public Vector3 GetFollowTarget(Vector3[] wps, Vector3 currentPos, out bool reachedGoal)
+    {
+        Vector3 nextWayPoint = GetFollowTarget(wps, currentPos);
+
+        float distToGoal = Vector3.Distance(currentPos, wps[wps.Length - 1]);
+        if (distToGoal < GetCellSize() * 0.5f)
+        {
+            reachedGoal = true;
+        }
+        else
+        {
+            reachedGoal = false;
+        }
+        return nextWayPoint;
+    }
+
+    public Vector3 GetFollowTarget(
+        Vector3[] wps, Vector3 currentPos,
+        int currentIndex, float snapDistance, float reachDistance,
+        out int nextIndex, out bool reachedGoal)
+    {
+        nextIndex = -1;
+        reachedGoal = false;
+
+        if (wps == null || wps.Length == 0) return currentPos;
+
+        int last = wps.Length - 1;
+
+        if (currentIndex < 0)
+        {
+            // Snap phase: move toward closest point on path
+            Vector3 cp = GetClosestPointOnPath(wps, currentPos);
+            float snapDist = Vector3.Distance(currentPos, cp);
+            if (snapDist > snapDistance)
+            {
+                nextIndex = -1;
+                return cp;
+            }
+            // Snapped: switch to forward waypoint of the closest segment
+            int segStart = GetClosestSegmentIndex(wps, currentPos);
+            int forwardIdx = segStart + 1;
+            if (forwardIdx > last) forwardIdx = last;
+            nextIndex = forwardIdx;
+            return wps[forwardIdx];
+        }
+
+        // Follow phase
+        if (currentIndex >= wps.Length) currentIndex = last;
+
+        Vector3 wp = wps[currentIndex];
+        float d = Vector3.Distance(currentPos, wp);
+        if (d > reachDistance)
+        {
+            nextIndex = currentIndex;
+            return wp;
+        }
+
+        // Reached current waypoint
+        if (currentIndex >= last)
+        {
+            reachedGoal = true;
+            nextIndex = -1;
+            return wp;
+        }
+
+        int nxt = currentIndex + 1;
+        nextIndex = nxt;
+        return wps[nxt];
+    }
+
+    private int GetClosestSegmentIndex(Vector3[] wps, Vector3 pos)
+    {
+        if (wps == null || wps.Length == 0) return 0;
+        if (wps.Length == 1) return 0;
+
+        float bestDist = 1e9f;
+        int bestIdx = 0;
+        for (int i = 0; i < wps.Length - 1; i++)
+        {
+            Vector3 cp = ClosestPointOnSegment(pos, wps[i], wps[i + 1]);
+            float d = Vector3.Distance(pos, cp);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    private Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b)
+    {
+        Vector3 ab = b - a;
+        float denom = Vector3.Dot(ab, ab);
+        if (denom < 0.0001f) return a;
+        float t = Vector3.Dot(p - a, ab) / denom;
+        t = Mathf.Clamp01(t);
+        return a + ab * t;
+    }
 
     public void OnDestroy()
     {

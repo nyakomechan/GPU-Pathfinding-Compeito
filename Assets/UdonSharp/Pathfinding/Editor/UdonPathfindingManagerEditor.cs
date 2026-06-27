@@ -13,7 +13,6 @@ public class UdonPathfindingManagerEditor : Editor
         { "gridSizeZ", "Number of voxel cells along the Z axis. / Z 軸方向のボクセルセル数。" },
         { "cellSize", "World-space size of one voxel cell. / 1 つのボクセルセルのワールド空間でのサイズ。" },
         { "gridOrigin", "World position of the grid's minimum corner (0,0,0). / グリッドの最小角 (0,0,0) に対応するワールド座標。" },
-        { "wallLayer", "Layer used for MeshCollider overlap checks. / MeshCollider の重なり判定に使用するレイヤー。" },
         { "heightFactor", "Cost multiplier for vertical movement. / 垂直方向の移動コストに掛ける係数。" },
         { "itersPerFrame", "Number of wavefront iterations processed per frame. / 1 フレームあたりに処理する wavefront イテレーション数。" },
         { "maxIterations", "Upper limit of iterations before giving up. / 探索を諦めるまでの最大イテレーション数。" },
