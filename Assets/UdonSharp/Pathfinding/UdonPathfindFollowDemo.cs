@@ -6,15 +6,12 @@ public class UdonPathfindFollowDemo : UdonSharpBehaviour
 {
     [Header("Pathfinding")]
     public UdonPathfindingManager manager;
-    public Vector3 start = new Vector3(1f, 1f, 1f);
-    public Vector3 goal = new Vector3(28f, 28f, 28f);
+    private Vector3 start = new Vector3(1f, 1f, 1f);
+    public Transform goalTarget = null;
 
     [Header("Movement")]
     public float moveSpeed = 3f;
     public int startDelayFrames = 60;
-
-    [Header("Restart")]
-    public KeyCode restartKey = KeyCode.R;
 
     private int frameCount;
     private bool pathReady;
@@ -22,6 +19,7 @@ public class UdonPathfindFollowDemo : UdonSharpBehaviour
 
     void Start()
     {
+        start = transform.position;
         if (manager == null)
         {
             Debug.LogWarning("[UdonPathfindFollowDemo] manager is not assigned");
@@ -43,12 +41,6 @@ public class UdonPathfindFollowDemo : UdonSharpBehaviour
             }
         }
 
-        if (Input.GetKeyDown(restartKey))
-        {
-            reachedGoal = false;
-            pathReady = false;
-            frameCount = 0;
-        }
 
         if (pathReady && !reachedGoal)
         {
@@ -58,8 +50,10 @@ public class UdonPathfindFollowDemo : UdonSharpBehaviour
 
     private void RequestPath()
     {
-        Debug.Log(string.Format("[UdonPathfindFollowDemo] Requesting path: {0} -> {1}", start, goal));
-        manager.RequestPath(start, goal, this);
+        if (goalTarget == null) return;
+
+        Debug.Log(string.Format("[UdonPathfindFollowDemo] Requesting path: {0} -> {1}", start, goalTarget.position));
+        manager.RequestPath(start, goalTarget.position, this);
     }
 
     private void FollowPath()
@@ -110,13 +104,5 @@ public class UdonPathfindFollowDemo : UdonSharpBehaviour
         pathReady = false;
     }
 
-    public override void Interact()
-    {
-        if (reachedGoal || !pathReady)
-        {
-            reachedGoal = false;
-            pathReady = false;
-            frameCount = startDelayFrames;
-        }
-    }
+
 }
