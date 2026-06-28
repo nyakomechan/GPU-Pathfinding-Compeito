@@ -11,6 +11,9 @@
     },
     "com.imaginantia.compeito": {
       "version": "1.0.1"
+    },
+    "com.nyakomake.udon-3d-pathfinding": {
+      "version": "0.1.0"
     }
   },
   "locked": {
@@ -31,6 +34,13 @@
     "com.imaginantia.compeito": {
       "version": "1.0.1",
       "dependencies": {}
+    },
+    "com.nyakomake.udon-3d-pathfinding": {
+      "version": "0.1.0",
+      "dependencies": {
+        "com.vrchat.worlds": ">=3.10.3",
+        "com.imaginantia.compeito": ">=1.0.1"
+      }
     }
   }
 }
